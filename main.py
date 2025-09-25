@@ -425,7 +425,7 @@ def compute_district_overturns(
 
 if __name__ == "__main__":
     df                  = build_cap_dataset()
-    judge_info          = pd.read_csv("judge_info.csv")
+    judge_info          = pd.read_csv("/data/judge_info.csv")
     whole_index         = build_district_tfidf_index(df, nrm=normalize_case_name, side=False)
     side_index          = build_district_tfidf_index(df, nrm=normalize_case_name, side=True)
     run_appellate_linking(df, whole_index, side_index)

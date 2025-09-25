@@ -22,7 +22,7 @@ def _arrow_filter_table(files: list[str], courts: list[str]):
     return table
 
 def build_cap_dataset(
-        pattern     = "parquet_files/CAP_data_*.parquet",
+        pattern     = "data/parquet_files/CAP_data_*.parquet",
         appellate   = ["Third Circuit"], 
         district    = ["Delaware", "New Jersey", "Pennsylvania", "Virgin Islands"]):
     """
