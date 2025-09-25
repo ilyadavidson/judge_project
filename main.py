@@ -11,8 +11,8 @@ from sklearn.preprocessing           import normalize
 
 from helper_functions                import split_on_v, _find_docket_in_text, _norm_docket, _candidate_judge_names, _text_contains_any, normalize_case_name, norm_id
 from helper_functions                import split_normalize_dockets, extract_all_dockets
-from routines                        import build_cap_dataset
-from API_call                        import _extract_text
+from data_loading                        import build_cap_dataset
+from api_call                        import _extract_text
 
 
 # Mapping appellate judges to district judges
