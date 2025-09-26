@@ -339,7 +339,8 @@ def judges_promoted_from_district(judge_info):
 
     out = out.drop_duplicates('judge id', keep='first')[['judge id', 'nomination date']]
 
-    judges_full = df.merge(out, on='judge id', how='left')
+    judges_full = df.merge(out, on='judge id', how='left').rename(columns={'nomination date_y': 'promotion date'})
+    judges_full['promoted'] = judges_full['promotion date'].notna().astype(int)
     promoted_judges = judges_full[judges_full['promoted']==1]
     return promoted_judges
 
@@ -425,13 +426,13 @@ def compute_district_overturns(
 
 if __name__ == "__main__":
     df                  = build_cap_dataset()
-    judge_info          = pd.read_csv("/data/judge_info.csv")
-    whole_index         = build_district_tfidf_index(df, nrm=normalize_case_name, side=False)
-    side_index          = build_district_tfidf_index(df, nrm=normalize_case_name, side=True)
-    run_appellate_linking(df, whole_index, side_index)
-
+    judge_info          = pd.read_csv("data/judge_info.csv")
+    # whole_index         = build_district_tfidf_index(df, nrm=normalize_case_name, side=False)
+    # side_index          = build_district_tfidf_index(df, nrm=normalize_case_name, side=True)
+    # run_appellate_linking(df, whole_index, side_index)
+    # print("Appellate matching done")
     promoted_judges     = judges_promoted_from_district(judge_info)
     pj_stats            = compute_district_overturns(df, judge_info,
-                                      api_path="batch_runs/results_merged_resume.jsonl",
+                                      api_path="batch_runs/api_responses.jsonl",
                                       mapping_path="results/appellate_matches.json")
-    print("Appellate matching done")
+    pj_stats.to_csv("results/promoted_judge_stats.csv", index=False)
