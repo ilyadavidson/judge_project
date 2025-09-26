@@ -216,3 +216,4 @@ batch_runs/
 *.parquet
 *.json
 *.jsonl
+.env

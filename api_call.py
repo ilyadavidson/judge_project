@@ -284,7 +284,7 @@ def run_API_batch_inference(
     return merged_path
 
 def download_and_merge_batch_outputs(
-    work_dir: str | Path = "batch_runs",
+    work_dir: str | Path = "results",
     *,
     include_errors: bool = True,
     only_completed: bool = True,
@@ -294,7 +294,7 @@ def download_and_merge_batch_outputs(
 
     Behavior:
       - Skips re-downloading any per-batch output/error files that already exist.
-      - If `results_merged_resume.jsonl` DOES NOT exist: build it from ALL existing per-batch outputs.
+      - If `api_responses.jsonl` DOES NOT exist: build it from ALL existing per-batch outputs.
       - If it DOES exist: APPEND ONLY newly downloaded outputs to it.
 
     Returns:
@@ -341,7 +341,7 @@ def download_and_merge_batch_outputs(
                     f.write(estream.read())
                 print(f"[Errors]   {bid} -> {err_path}")
 
-    merged = work_dir / "results_merged_resume.jsonl"
+    merged = work_dir / "api_responses.jsonl"
 
     # Decide how to (re)build the merged file
     if merged.exists():
