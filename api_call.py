@@ -109,8 +109,7 @@ def _extract_text(resp: dict):
 def run_API_batch_inference(
         input_file:         str = "input_api_format.jsonl",
         max_bytes:          int = 200 * 1024 * 1024,
-        output_dir:         str = "input",
-        output_prefix:      str = "reponse_part",
+        output_prefix:      str = "inpurt_chunk",
         endpoint:           str = "/v1/chat/completions",
         completion_window:  str = "24h",
         work_dir:           str = "batch_runs",
@@ -139,15 +138,18 @@ def run_API_batch_inference(
     input_dir       = work / "input_chunks"
     output_dir      = work / "output"
 
+    work.mkdir(parents=True, exist_ok=True)
     input_dir.mkdir(parents=True, exist_ok=True) 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    input_path = work / input_file  
 
     # Set up the batch request body
     ######################################################################################
     """
-    The API expects a json with a call for every case, this creates that jsonl file.
+    The API expects a jsonl with a call for every case, this creates that jsonl file, called: input_file (default: input_api_format.jsonl).
     """
-    cases = text_builder(df, limit=10, max_tokens_each=3000) # should be +- 50.000 for Third Circuit
+    cases = text_builder(df, limit=None, max_tokens_each=3000) # should be +- 50.000 for Third Circuit
 
     res = []
     for index, row in enumerate(cases):
@@ -156,7 +158,7 @@ def run_API_batch_inference(
         except Exception as e:
             print(f"Error creating BatchRequest for row {index}: {e}")
 
-    with open(input_file, "w", encoding="utf-8") as f:
+    with open(input_path, "w", encoding="utf-8") as f:
         for r in res:
             try:
                 json.dump(r.to_dict(), f, ensure_ascii=False)
@@ -165,7 +167,7 @@ def run_API_batch_inference(
                 print(f"Error serializing BatchRequest: {e}")    
     
     # Sanity check
-    with open(input_file, "r", encoding="utf-8") as f:
+    with open(input_path, "r", encoding="utf-8") as f:
         num_items = sum(1 for _ in f)
     print(f"Number of items in jsonl: {num_items}") # for Third Circuit this should be about 51.000 appellate cases
     
