@@ -4,6 +4,7 @@ Helper functions for appellate_mapping
 
 import re
 import pandas as pd
+import tiktoken
 
 def split_on_v(name: str):
     """

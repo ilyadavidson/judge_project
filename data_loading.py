@@ -4,7 +4,7 @@ import pandas as pd
 
 import pyarrow.dataset as ds
 import pyarrow.compute as pc
-
+import tiktoken
 
 def _arrow_filter_table(files: list[str], courts: list[str]):
     """
@@ -57,3 +57,37 @@ def build_cap_dataset(
     df["unique_id"] = df.index.astype(str)
     df["is_appellate"] = np.where(df["court_name"].str.contains("Appeals", case=False, na=False), 1, 0)
     return df
+
+enc = tiktoken.get_encoding("o200k_base")
+
+def truncate_opinion(text, max_tokens= 6000) -> str:
+    text = "" if text is None else str(text)
+    toks = enc.encode(text)
+    if len(toks) > max_tokens:
+        head = toks[:max_tokens]
+        tail = toks[-max_tokens:]
+        toks = head + tail
+    return enc.decode(toks)
+
+def text_builder(df, limit, max_tokens_each):
+    """ 
+    Function to call in dataset.
+    
+    :param df: original df.
+    :param limit: how many cases to load.
+    :param max_tokens_each: how many of the last tokens we want to keep.
+    """
+    if limit    == None:
+        subset  = df[df['is_appellate']==1].copy()
+    else:
+        subset  = df[df['is_appellate']==1].head(limit).copy()
+    
+    results = []
+
+    for _, row in subset.iterrows():
+        cid         = row["unique_id"]
+        raw_text    = row["opinion_text"]
+        trimmed     = truncate_opinion(raw_text, max_tokens=max_tokens_each)
+        results.append({"id": cid, "text": trimmed})
+
+    return results

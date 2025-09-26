@@ -2,7 +2,7 @@ from    __future__          import annotations
 # from    batch_inference     import BatchRequest, batch_request_body
 from    pathlib             import Path
 from    dotenv              import load_dotenv 
-from    not_needed.API_overturnrate    import truncate_opinion, text_builder
+from    data_loading    import truncate_opinion, text_builder
 from    openai              import OpenAI
 from typing import List, Optional, Tuple
 from    data_loading        import build_cap_dataset
