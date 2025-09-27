@@ -11,7 +11,7 @@ from sklearn.preprocessing           import normalize
 
 from helper_functions                import split_on_v, _find_docket_in_text, _norm_docket, _candidate_judge_names, _text_contains_any, normalize_case_name, norm_id
 from helper_functions                import split_normalize_dockets, extract_all_dockets
-from data_loading                        import build_cap_dataset
+from data_loading                    import build_cap_dataset
 from api_call                        import _extract_text
 
 
@@ -306,45 +306,10 @@ def run_appellate_linking(df, whole_index, side_index , nrm = normalize_case_nam
 # Mapping judge promotions
 ####
 
-# def judges_promoted_from_district(judge_info):
-#     """
-#     Return a DataFrame with judges who have at least one 'district' row and
-#     at least one 'appeals' OR 'circuit' row. The 'nomination_date' returned
-#     is taken from the latest appellate/circuit entry.
-
-#     :param judge_info: DataFrame with columns including 'judge id', 'court name', 'nomination date'
-
-#     :return: subset of the judge_info dataframe but only promoted judges and when they were promoted
-#     """
-#     df = judge_info.copy()
-
-#     # Identify judges with both district and appellate/circuit roles
-#     ############################################################################
-#     mask_d = df['court name'].str.contains("district", case=False, na=False) # worked as a district judge 
-#     mask_a = df['court name'].str.contains(r"appeals|circuit", case=False, na=False) # worked as an appellate judge
-
-
-#     app_rows = df.loc[mask_a, ['judge id', 'nomination date']] # all judges who have been appellate judges
-#     district_ids = set(df.loc[mask_d, 'judge id']) 
-#     both_ids = district_ids & set(app_rows['judge id'])  # judges who have both district & appellate/circuit presence
-
-
-#     # Filter to only those judges and get their earliest appellate nomination date
-#     ############################################################################
-#     app_rows = app_rows[app_rows['judge id'].isin(both_ids)]
-
-#     out = (app_rows.sort_values(['judge id', 'nomination date'])
-#                     .groupby('judge id', as_index=False)
-#                     .head(1)) # keep the first nomination date per judge id
-
-#     out = out.drop_duplicates('judge id', keep='first')[['judge id', 'nomination date']]
-
-#     judges_full = df.merge(out, on='judge id', how='left').rename(columns={'nomination date_y': 'promotion date'})
-#     judges_full['promoted'] = judges_full['promotion date'].notna().astype(int)
-#     promoted_judges = judges_full[judges_full['promoted']==1]
-#     return promoted_judges
-
 def judges_promoted_from_district(judge_info):
+    """
+    Returns a df of all judges who got promoted from district to appellate courts. Their promotion date is the earliest nomination date that they got to the appellate court. 
+    """
     aj = judge_info[judge_info['court type'].str.contains('Appeals|Circuit', case=False, na=False)]
     dj = judge_info[judge_info['court type'].str.contains('District')]
     pj = aj[aj['judge id'].isin(dj['judge id'])].copy()
@@ -356,7 +321,7 @@ def judges_promoted_from_district(judge_info):
 def compute_district_overturns(
     df:             pd.DataFrame,
     judge_info:     pd.DataFrame,
-    api_path:       str = "batch_runs/results_merged_resume.jsonl",
+    api_path:       str = "batch_runs/api_responses.jsonl",
     mapping_path:   str = "results/appellate_matches.json",
 ) -> pd.DataFrame:
     """
