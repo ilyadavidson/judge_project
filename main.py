@@ -317,7 +317,6 @@ def judges_promoted_from_district(judge_info):
     pj = pj.sort_values(['judge id','nomination date']).drop_duplicates('judge id', keep='first')
     return pj
 
-
 def compute_district_overturns(
     df:             pd.DataFrame,
     judge_info:     pd.DataFrame,

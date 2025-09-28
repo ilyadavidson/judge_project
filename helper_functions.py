@@ -5,6 +5,7 @@ Helper functions for appellate_mapping
 import re
 import pandas as pd
 import tiktoken
+import matplotlib.pyplot as plt
 
 def split_on_v(name: str):
     """
@@ -207,3 +208,54 @@ def norm_id(x):
             return s
     return s
 
+def plot_distributions(df, columns):
+    """
+    Plot distribution(s) of selected columns from a DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing your results.
+    columns : list[str]
+        List of column names to plot. 
+        Supported: categorical columns (bar) and 'politicality_score' (hist).
+    """
+    n = len(columns)
+    if n == 0:
+        print("No columns provided.")
+        return
+    
+    # Determine subplot grid size
+    rows = (n + 1) // 2 if n > 1 else 1
+    cols = 2 if n > 1 else 1
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows))
+    
+    # Flatten axes into list for easy indexing
+    if n == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten()
+    
+    for i, col in enumerate(columns):
+        ax = axes[i]
+        if col == "politicality_score":
+            df[col].plot(
+                kind="hist", bins=range(1, 7), rwidth=0.8, ax=ax, color="goldenrod"
+            )
+            ax.set_title("Politicality Score Distribution")
+            ax.set_xlabel("Score")
+            ax.set_ylabel("Frequency")
+            ax.set_xticks(range(1, 6))
+        else:
+            df[col].value_counts().plot(kind="bar", ax=ax, color="skyblue")
+            ax.set_title(f"{col.replace('_', ' ').title()} Distribution")
+            ax.set_xlabel(col.replace('_', ' ').title())
+            ax.set_ylabel("Count")
+            ax.tick_params(axis="x", rotation=45)
+    
+    # Hide unused subplots if any
+    for j in range(i + 1, len(axes)):
+        axes[j].set_visible(False)
+    
+    plt.tight_layout()
+    plt.show()
