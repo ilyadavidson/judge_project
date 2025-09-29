@@ -16,20 +16,26 @@ from api_call                        import _extract_text
 
 
 # Mapping appellate judges to district judges
-###
-def build_district_tfidf_index(df, nrm, analyzer="word", min_df=1, max_df=0.8, side: bool = False):
+###################################################################################
+def build_district_tfidf_index(     df          = None, 
+                                    nrm         = normalize_case_name, 
+                                    analyzer    = "word", 
+                                    min_df      = 1, 
+                                    max_df      = 0.8, 
+                                    side:       bool = False):
     """
     Build a TF-IDF index over all district cases.
 
-    :param df: DataFrame with CAP data, must include 'is_appellate', 'name', 'decision_date'
-    :param nrm: function to normalize case names
-    :param analyzer: 'word' or 'char' for TfidfVectorizer
-    :param min_df: decides the minimum number of documents a term must appear in to be included
-    :param max_df: decides the maximum proportion of documents a term can appear in to be included (if <1, deletes common terms)
-    :param side: builds either a single whole-caption TF-IDF matrix (False) or side-aware matrices (True) if cases will be split on vs./v. 
+    :param df:          DataFrame with CAP data, must include 'is_appellate', 'name', 'decision_date'
+    :param nrm:         Function to normalize case names
+    :param analyzer:    'word' or 'char' for TfidfVectorizer
+    :param min_df:      Ignores terms that have a document frequency strictly lower than the given threshold. (If = 1 then used all terms).
+    :param max_df:      Decides the maximum proportion of documents a term can appear in to be included (if <1, deletes common terms)
+    :param side:        Builds either a single whole-caption TF-IDF matrix (False) or side-aware matrices (True) if cases will be split on vs./v. 
     """
-    dcts = df[df["is_appellate"] == 0].copy()
-    raw = dcts["name"].astype(str)
+    
+    dcts        = df[df["is_appellate"] == 0].copy()    # district cases
+    raw         = dcts["name"].astype(str)              # raw case names
 
     # Not side-aware branch
     #####################################################################################################################
@@ -53,8 +59,8 @@ def build_district_tfidf_index(df, nrm, analyzer="word", min_df=1, max_df=0.8, s
 
     # Side-aware branch
     ####################################################################################################################
-    LR          = raw.apply(split_on_v) # splits the case names into a plaintiff and defendent side
-    has_both    = LR.map(lambda t: t[0] is not None and t[1] is not None)
+    LR          = raw.apply(split_on_v)                                     # splits the case names into a plaintiff and defendent side
+    has_both    = LR.map(lambda t: t[0] is not None and t[1] is not None)   # only keep those with both sides
 
     dcts        = dcts.loc[has_both].copy()
     left_raw    = LR.loc[has_both].map(lambda t: t[0])
@@ -64,8 +70,9 @@ def build_district_tfidf_index(df, nrm, analyzer="word", min_df=1, max_df=0.8, s
     right_norm  = right_raw.map(nrm) if nrm else right_raw
 
     vec = TfidfVectorizer(
-        analyzer=analyzer, 
-        min_df=min_df, max_df=max_df, lowercase=False
+        analyzer    = analyzer, 
+        min_df      = min_df, 
+        max_df      = max_df
     )
     vec.fit(pd.concat([left_norm, right_norm], ignore_index=True))
 
@@ -88,15 +95,15 @@ def appellate_mapping(df, side_index, nrm, score_cutoff, side_threshold, whole_i
     """
     Side-aware TF-IDF matching for appellate cases. 
 
-    :param df: DataFrame with all cases
-    :param side_index: output of build_side_aware_district_index()
-    :param normalize_fn: function to normalize case names
-    :param score_cutoff: minimum similarity score to report a match
-    :param side_threshold: minimum side similarity (0-1) to consider both sides matching
-    :param fallback_index: optional district index (output of build_district_tfidf_index) to use when no 'v' in appellate name.
+    :param df:              DataFrame with all cases
+    :param side_index:      Output of build_side_aware_district_index()
+    :param normalize_fn:    Function to normalize case names
+    :param score_cutoff:    Minimum similarity score to report a match
+    :param side_threshold:  Minimum side similarity (0-1) to consider both sides matching
+    :param fallback_index:  Optional district index (output of build_district_tfidf_index) to use when no 'v' in appellate name.
     """
 
-    # Obtain the side-aware district index built outside
+    # Obtain the side-aware district index built in function above
     ############################################################################################################
     vec       = side_index["vectorizer"]
     X_left    = side_index["X_left"]
@@ -126,7 +133,7 @@ def appellate_mapping(df, side_index, nrm, score_cutoff, side_threshold, whole_i
             xq      = normalize(whole_index["vectorizer"].transform([q]), norm="l2", copy=False)
             sims    = whole_index["X_dct"].dot(xq.T).toarray().ravel()
 
-            # 7-year window
+            # 7-year window (we make the assumption that appellate cases are within 7 years of district case).
             if pd.isna(a_dt):
                 valid   = np.ones_like(sims, dtype=bool)
             else:
@@ -139,18 +146,18 @@ def appellate_mapping(df, side_index, nrm, score_cutoff, side_threshold, whole_i
             
             sims[~valid] = 0.0 # Set all the dates that don't match score to 0
 
-            r = int(np.argmax(sims))
-            best = float(sims[r])
+            r       = int(np.argmax(sims))
+            best    = float(sims[r])
             if best <= score_cutoff:
                 continue
             out.append({
-                "appellate_index": ai,
-                "district_index": int(whole_index["dct_index"][r]),
-                "score": best + 0.15, # Since there's no v we add a small bonus to the score as it's more difficult to be similar
-                "appellate_name": q,
-                "district_name": whole_index["dct_names"].iloc[r],
-                "appellate_name_raw": a_raw,
-                "district_name_raw": df.at[int(whole_index["dct_index"][r]), "name"],
+                "appellate_index":      ai,
+                "district_index":       int(whole_index["dct_index"][r]),
+                "score":                best + 0.15, # Since there's no v we add a small bonus to the score as it's more difficult to be similar
+                "appellate_name":       q,
+                "district_name":        whole_index["dct_names"].iloc[r],
+                "appellate_name_raw":   a_raw,
+                "district_name_raw":    df.at[int(whole_index["dct_index"][r]), "name"],
             })
             continue
 
@@ -244,7 +251,15 @@ def confirm_midrange_matches(matches, df_all, score_low=0.50, score_high=0.80):
     
     return out
 
-def run_appellate_linking(df, whole_index, side_index , nrm = normalize_case_name, score_cutoff = 0.0, side_threshold = 0.7, score_low = 0.50, score_high = 0.80, out_json_path = "appellate_matches.json"):
+def run_appellate_linking(df, 
+                          whole_index, 
+                          side_index , 
+                          nrm               = normalize_case_name, 
+                          score_cutoff      = 0.0, 
+                          side_threshold    = 0.7, 
+                          score_low         = 0.5, 
+                          score_high        = 0.8, 
+                          out_json_path     = "appellate_matches.json"):
     """
     Orchestrates the full pipeline of appellate mapping.
     Returns (best_matches_df, confirmed_df).
@@ -304,7 +319,7 @@ def run_appellate_linking(df, whole_index, side_index , nrm = normalize_case_nam
     return best_matches, confirmed_only
 
 # Mapping judge promotions
-####
+################################################################################
 
 def judges_promoted_from_district(judge_info):
     """
