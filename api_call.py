@@ -1,16 +1,20 @@
-from    __future__          import annotations
-# from    batch_inference     import BatchRequest, batch_request_body
-from    pathlib             import Path
-from    dotenv              import load_dotenv 
-from    data_loading    import truncate_opinion, text_builder
-from    openai              import OpenAI
-from typing import List, Optional, Tuple
-from    data_loading        import build_cap_dataset
+"""
+This file runs the batch inference using the OpenAI API.
+"""
+
+from __future__ import annotations
 
 import glob
-import os
-import time 
 import json
+import os
+import time
+from pathlib        import Path
+from typing         import Optional, Tuple, List
+
+from dotenv         import load_dotenv
+from openai         import OpenAI
+
+from data_loading   import build_cap_dataset, text_builder, truncate_opinion
 
 system_msg          = (
     "You are a legal assistant. Your task has seven parts, and you must return JSON only with the required keys.\n\n"
@@ -55,11 +59,11 @@ user_template       = "Classify this appellate opinion:\n\n{opinion_text}"
 
 class batch_request_body:
     def __init__(self, opinion_text: str):
-        self.model = "gpt-5-mini-2025-08-07"
-        self.messages = [
-            {"role": "system", "content": system_msg},
-            {"role": "developer", "content": developer_msg},
-            {"role": "user", "content": user_template.format(opinion_text=opinion_text)},
+        self.model          = "gpt-5-mini-2025-08-07"
+        self.messages       = [
+            {"role": "system", "content":       system_msg},
+            {"role": "developer", "content":    developer_msg},
+            {"role": "user", "content":         user_template.format(opinion_text=opinion_text)},
         ]
 
     def to_dict(self):
@@ -69,18 +73,20 @@ class batch_request_body:
         }
 
 class BatchRequest:
-    def __init__(self, custom_id, body: str):
-        self.custom_id = str(custom_id)                 # no trailing comma
-        self.method = "POST"                            # no trailing comma
-        self.url = "/v1/chat/completions"               # no trailing comma
-        self.body = batch_request_body(body).to_dict()  # store as dict, not object
+    def __init__(self, 
+                 custom_id: str, # case ID
+                 body: str):
+        self.custom_id      = str(custom_id)                
+        self.method         = "POST"                           
+        self.url            = "/v1/chat/completions"               
+        self.body           = batch_request_body(body).to_dict()  
 
     def to_dict(self):
         return {
-            "custom_id": self.custom_id,
-            "method": self.method,
-            "url": self.url,
-            "body": self.body,
+            "custom_id":    self.custom_id,
+            "method":       self.method,
+            "url":          self.url,
+            "body":         self.body,
         }
 
 def _extract_text(resp: dict):
@@ -107,9 +113,9 @@ def _extract_text(resp: dict):
     return None
 
 def run_API_batch_inference(
-        input_file:         str = "input_api_format.jsonl",
-        max_bytes:          int = 200 * 1024 * 1024,
-        output_prefix:      str = "inpurt_chunk",
+        input_file:         str = "input_api_format.jsonl", 
+        max_bytes:          int = 200 * 1024 * 1024,        
+        output_prefix:      str = "input_chunk",
         endpoint:           str = "/v1/chat/completions",
         completion_window:  str = "24h",
         work_dir:           str = "batch_runs",
@@ -118,14 +124,14 @@ def run_API_batch_inference(
     """
     Splits a large JSONL file into roughly equal parts, uploads them to OpenAI for batch processing, returns the API responses.
 
-    :param input_file: Path to the large JSONL file to be split and processed. Has the format required by the OpenAI API, with the messages and query we want to ask the AI.
-    :param max_bytes: OpenAI's maximum file size for batch processing is 200MB, so we split the input file into parts no larger than this.
-    :param output_dir: Directory to save the split files that will be used as input for the batch API call.
-    :param output_prefix: Prefix for the split files.
-    :param endpoint: OpenAI API endpoint to use for batch processing.
-    :param completion_window: Time window for the batch job to complete.
-    :param work_dir: Directory to save intermediate and output files.
-    :param df: full df.
+    :param input_file:          Path to the large JSONL file to be split and processed. Has the format required by the OpenAI API, with the messages and query we want to ask the AI.
+    :param max_bytes:           OpenAI's maximum file size for batch processing is 200MB, so we split the input file into parts no larger than this.
+    :param output_dir:          Directory to save the split files that will be used as input for the batch API call.
+    :param output_prefix:       Prefix for the split files.
+    :param endpoint:            OpenAI API endpoint to use for batch processing.
+    :param completion_window:   Time window for the batch job to complete.
+    :param work_dir:            Directory to save intermediate and output files.
+    :param df:                  Df containing cases.
 
     :return: None. Saves the API responses to 'results.jsonl'.
     """
@@ -178,7 +184,7 @@ def run_API_batch_inference(
     Now that we have the correct input for the API (input_file), we need to split it up in parts no larger than 200MB.
     This returns parth_paths, in the input_dir, which we will upload to OpenAI (batch_runs/input).
     """
-    src = Path(input_file)
+    src = input_path
     if not src.exists():
         raise FileNotFoundError(f"Input file not found: {src.resolve()}")
 

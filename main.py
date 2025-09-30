@@ -17,11 +17,11 @@ from api_call                        import _extract_text
 
 # Mapping appellate judges to district judges
 ###################################################################################
-def build_district_tfidf_index(     df          = None, 
-                                    nrm         = normalize_case_name, 
-                                    analyzer    = "word", 
-                                    min_df      = 1, 
-                                    max_df      = 0.8, 
+def build_district_tfidf_index(     df:         pd.DataFrame = None, 
+                                    nrm:        function = normalize_case_name, 
+                                    analyzer:   str = "word", 
+                                    min_df:     int = 1, 
+                                    max_df:     float = 0.8, 
                                     side:       bool = False):
     """
     Build a TF-IDF index over all district cases.
