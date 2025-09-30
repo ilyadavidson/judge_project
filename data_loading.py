@@ -69,7 +69,7 @@ def truncate_opinion(text, max_tokens= 6000) -> str:
         toks = head + tail
     return enc.decode(toks)
 
-def text_builder(df, limit, max_tokens_each):
+def text_builder(df, limit, mx_tk):
     """ 
     Function to call in dataset.
     
@@ -87,7 +87,7 @@ def text_builder(df, limit, max_tokens_each):
     for _, row in subset.iterrows():
         cid         = row["unique_id"]
         raw_text    = row["opinion_text"]
-        trimmed     = truncate_opinion(raw_text, max_tokens=max_tokens_each)
+        trimmed     = truncate_opinion(raw_text, max_tokens=mx_tk)
         results.append({"id": cid, "text": trimmed})
 
     return results

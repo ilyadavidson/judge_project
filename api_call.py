@@ -10,6 +10,7 @@ import os
 import time
 from pathlib        import Path
 from typing         import Optional, Tuple, List
+import pandas       as pd
 
 from dotenv         import load_dotenv
 from openai         import OpenAI
@@ -89,301 +90,290 @@ class BatchRequest:
             "body":         self.body,
         }
 
-def _extract_text(resp: dict):
-    if not isinstance(resp, dict):
-        return None
-    body = resp.get("body")
-    if isinstance(body, dict):
-        choices = body.get("choices")
-        if isinstance(choices, list) and choices:
-            return choices[0]["message"]["content"]
-    # responses API shapes (fallbacks)
-    if isinstance(resp.get("output_text"), str):
-        return resp["output_text"]
-    out = resp.get("output")
-    if isinstance(out, list):
-        parts = []
-        for msg in out:
-            content = msg.get("content", [])
-            if isinstance(content, list):
-                for part in content:
-                    t = part.get("text")
-                    if t: parts.append(t)
-        return "".join(parts) if parts else None
-    return None
-
-def run_API_batch_inference(
-        input_file:         str = "input_api_format.jsonl", 
-        max_bytes:          int = 200 * 1024 * 1024,        
-        output_prefix:      str = "input_chunk",
-        endpoint:           str = "/v1/chat/completions",
-        completion_window:  str = "24h",
-        work_dir:           str = "batch_runs",
-        df:                 any = None,
-        ):
-    """
-    Splits a large JSONL file into roughly equal parts, uploads them to OpenAI for batch processing, returns the API responses.
-
-    :param input_file:          Path to the large JSONL file to be split and processed. Has the format required by the OpenAI API, with the messages and query we want to ask the AI.
-    :param max_bytes:           OpenAI's maximum file size for batch processing is 200MB, so we split the input file into parts no larger than this.
-    :param output_dir:          Directory to save the split files that will be used as input for the batch API call.
-    :param output_prefix:       Prefix for the split files.
-    :param endpoint:            OpenAI API endpoint to use for batch processing.
-    :param completion_window:   Time window for the batch job to complete.
-    :param work_dir:            Directory to save intermediate and output files.
-    :param df:                  Df containing cases.
-
-    :return: None. Saves the API responses to 'results.jsonl'.
-    """
-    
-    # Set up variables and OpenAI client
-    ######################################################################################
-    load_dotenv()  
-    client          = OpenAI()
-    work            = Path(work_dir)
-    input_dir       = work / "input_chunks"
-    output_dir      = work / "output"
-
-    work.mkdir(parents=True, exist_ok=True)
-    input_dir.mkdir(parents=True, exist_ok=True) 
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    input_path = work / input_file  
-
-    # Set up the batch request body
-    ######################################################################################
-    """
-    The API expects a jsonl with a call for every case, this creates that jsonl file, called: input_file (default: input_api_format.jsonl).
-    """
-    cases = text_builder(df, limit=None, max_tokens_each=3000) # should be +- 50.000 for Third Circuit
-
-    res = []
-    for index, row in enumerate(cases):
-        try:
-            res.append(BatchRequest(custom_id=row["id"], body=row["text"]))
-        except Exception as e:
-            print(f"Error creating BatchRequest for row {index}: {e}")
-
-    with open(input_path, "w", encoding="utf-8") as f:
-        for r in res:
+def _collect_done_ids(output_file: Path) -> set[str]:
+    """Returns set of case ids that have already been processed in the final output file."""
+    done_ids = set()
+    if not output_file.exists():
+        return done_ids
+    with output_file.open("r", encoding="utf-8") as f:
+        for line in f:
             try:
-                json.dump(r.to_dict(), f, ensure_ascii=False)
-                f.write("\n")
-            except Exception as e:
-                print(f"Error serializing BatchRequest: {e}")    
+                obj     = json.loads(line)
+                cid     = obj.get("custom_id")
+                if cid:
+                    done_ids.add(cid)
+            except Exception:
+                continue
+    return done_ids
+
+def _build_full_input(df, 
+                      inp_path: Path,
+                      mx_tk:    int = 3000) -> int: 
+    """Writes the full input jsonl file for the API from the cases dataframe.
     
-    # Sanity check
-    with open(input_path, "r", encoding="utf-8") as f:
-        num_items = sum(1 for _ in f)
-    print(f"Number of items in jsonl: {num_items}") # for Third Circuit this should be about 51.000 appellate cases
-    
-    
-    # Split up the input file and upload parts, OpenAI can only take files up to 200MB
-    ######################################################################################
+    :param df:         DataFrame containing the cases to process.
+    :param out_path:   Path to write the output jsonl file. # input_api_format.jsonl
+    :param mx_tk:      Maximum tokens for each case text.
     """
-    Now that we have the correct input for the API (input_file), we need to split it up in parts no larger than 200MB.
+
+    cases  = text_builder(df, limit=None, mx_tk=mx_tk) # should be +- 50.000 for Third Circuit
+    inp_path.parent.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with inp_path.open("w", encoding="utf-8") as f:
+        for row in cases:
+            cid     = str(row["id"])
+            body    = row["text"]
+            br      = BatchRequest(custom_id=cid, body=body)
+            json.dump(br.to_dict(), f, ensure_ascii=False)
+            f.write("\n")
+            n += 1
+    print(f"[Build] Wrote {n} requests -> {inp_path}")
+    return n    
+
+def _write_missing_only(df, merged_done: set[str], out_path: Path, mx_tk: int = 3000) -> int:
+    """Write ONLY missing requests to JSONL by reusing text_builder output."""
+    cases           = text_builder(df, limit=None, mx_tk=mx_tk)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    id2text         = {str(r["id"]): r["text"] for r in cases if "id" in r and "text" in r}
+    missing_ids     = set(id2text.keys()) - merged_done
+    cnt             = 0
+
+    with out_path.open("w", encoding="utf-8") as f:
+        for cid in sorted(missing_ids):
+            br = BatchRequest(custom_id=cid, body=id2text[cid])
+            json.dump(br.to_dict(), f, ensure_ascii=False)
+            f.write("\n")
+            cnt += 1
+
+    print(f"[Build] Missing requests: {cnt} -> {out_path}")
+    return cnt
+
+def _split_by_size(src:         Path, 
+                   dst_dir:     Path, 
+                   prefix:      str = "input_chunk", 
+                   max_bytes=   200*1024*1024) -> List[Path]:
+    """Now that we have the correct input for the API (input_file), we need to split it up in parts no larger than 200MB.
     This returns parth_paths, in the input_dir, which we will upload to OpenAI (batch_runs/input).
     """
-    src = input_path
-    if not src.exists():
-        raise FileNotFoundError(f"Input file not found: {src.resolve()}")
 
-    part_paths: List[Path] = []
-    part_idx               = 1
-    bytes_in_part          = 0
-    part_path              = input_dir / f"{output_prefix}_{part_idx}.jsonl"
-    out_f                  = part_path.open("wb")
-
-    with src.open("rb") as inp:  # read in binary so size is accurate
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    parts:                      List[Path] = []
+    part_idx, bytes_in_part     = 1, 0
+    part_path                   = dst_dir / f"{prefix}_{part_idx}.jsonl"
+    out_f                       = part_path.open("wb")
+    
+    with src.open("rb") as inp:
         for line in inp:
-            line_len = len(line)
-
-            if bytes_in_part > 0 and bytes_in_part + line_len > max_bytes:
+            ln = len(line)
+            if bytes_in_part > 0 and bytes_in_part + ln > max_bytes:
                 out_f.close()
-                print(f"[Split] Finalized {part_path} at {bytes_in_part} bytes")
-
-                part_idx        += 1
-                bytes_in_part   = 0
-                part_path       = input_dir / f"{output_prefix}_{part_idx}.jsonl"
-                out_f           = part_path.open("wb")
-
+                parts.append(part_path)
+                part_idx += 1
+                bytes_in_part = 0
+                part_path = dst_dir / f"{prefix}_{part_idx}.jsonl"
+                out_f = part_path.open("wb")
             out_f.write(line)
-            bytes_in_part       += line_len
-
+            bytes_in_part += ln
     out_f.close()
-    part_paths = sorted(input_dir.glob(f"{output_prefix}_*.jsonl"))
+    parts.append(part_path)
+    print(f"[Split] Created {len(parts)} part(s) in {dst_dir}")
+    return parts
 
-    if not part_paths:
-        raise RuntimeError("No parts were created — nothing to upload.")
-
-    # Upload all the parts to OpenAI
-    # #####################################################################################
-    uploaded_file_ids: List[str] = []
-    for p in part_paths:
+def _enqueue_chunks(parts: List[Path], endpoint: str, completion_window: str) -> List[str]:
+    """Upload chunk files and create batches."""
+    load_dotenv()
+    client      = OpenAI()
+    batch_ids:  List[str] = []
+    for p in parts:
         with p.open("rb") as fh:
             file_obj = client.files.create(file=fh, purpose="batch")
-        uploaded_file_ids.append(file_obj.id)
-
-    # Create a batch request for each uploaded file
-    ######################################################################################
-    batch_ids: List[str] = []
-    for file_id in uploaded_file_ids:
         batch = client.batches.create(
-            input_file_id       =   file_id,
-            endpoint            =   endpoint,
-            completion_window   =   completion_window,
-            metadata            =   {"description": f"Batch for {file_id}"},
+            input_file_id       = file_obj.id,
+            endpoint            = endpoint,
+            completion_window   = completion_window,
+            metadata={"description": f"Batch for {p.name}"},
         )
         batch_ids.append(batch.id)
-        print(f"[Batch] Created batch {batch.id} for input file {file_id}")
+        print(f"[Batch] Created {batch.id} for {p.name}")
+    return batch_ids
 
-    # Download all if done
-    ######################################################################################
-    result_part_files: List[Path] = []
-    error_part_files: List[Path] = []
-    terminal_statuses = {"completed", "failed", "cancelled", "expired"}
-
-    for bid in batch_ids:
-        # Poll until the batch reaches a terminal state
-        while True:
-            b = client.batches.retrieve(bid)
-            status = getattr(b, "status", None)
-            print(f"[Poll] batch_id={bid} status={status}")
-            if status in terminal_statuses:
-                break
-            time.sleep(10)
-
-        # Download output if present
-        out_fid = getattr(b, "output_file_id", None)
-        if out_fid:
-            resp = client.files.content(out_fid)
-            part_out = output_dir / f"{bid}_results.jsonl"
-            with part_out.open("wb") as fh:
-                fh.write(resp.read())
-            print(f"[Download] output batch_id={bid} -> {part_out}")
-            result_part_files.append(part_out)
-        else:
-            print(f"[Info] batch_id={bid} has no output_file_id")
-
-        # Download errors if present
-        err_fid = getattr(b, "error_file_id", None)
-        if err_fid:
-            err_stream = client.files.content(err_fid)
-            part_err = output_dir / f"{bid}_errors.jsonl"
-            with part_err.open("wb") as fh:
-                fh.write(err_stream.read())
-            print(f"[Download] errors batch_id={bid} -> {part_err}")
-            error_part_files.append(part_err)
-
-    if not result_part_files:
-        raise RuntimeError("No result files were downloaded.")
-
-    # Merge everything in one output file
-    ######################################################################################
-    merged_path = work / "results_merged.jsonl"
-    with merged_path.open("wb") as out:
-        for rf in result_part_files:
-            with rf.open("rb") as inp:
-                out.write(inp.read())
-    print(f"[Merge] Merged {len(result_part_files)} file(s) into {merged_path.resolve()}")
-
-    return merged_path
-
-def download_and_merge_batch_outputs(
-    work_dir: str | Path = "results",
-    *,
-    include_errors: bool = True,
-    only_completed: bool = True,
-) -> Tuple[List[Path], Optional[Path]]:
-    """
-    Lists batches, downloads output/error files for completed ones, and merges outputs.
-
-    Behavior:
-      - Skips re-downloading any per-batch output/error files that already exist.
-      - If `api_responses.jsonl` DOES NOT exist: build it from ALL existing per-batch outputs.
-      - If it DOES exist: APPEND ONLY newly downloaded outputs to it.
-
-    Returns:
-        (newly_downloaded_outputs, merged_path)
-    """
+def _download_new_outputs(batch_ids: List[str], out_dir: Path, poll: bool, poll_interval: int = 20) -> List[Path]:
+    """Optionally poll batches to completion and download outputs/errors."""
     load_dotenv()
     client = OpenAI()
-
-    work_dir = Path(work_dir)
-    out_dir = work_dir / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
+    terminal = {"completed", "failed", "cancelled", "expired"}
+    new_outputs: List[Path] = []
 
-    batches = client.batches.list()
-    print("Found", len(batches.data), "batches")
+    for bid in batch_ids:
+        if poll:
+            while True:
+                b = client.batches.retrieve(bid)
+                st = getattr(b, "status", None)
+                print(f"[Poll] {bid} status={st}")
+                if st in terminal:
+                    break
+                time.sleep(poll_interval)
+        else:
+            b = client.batches.retrieve(bid)
 
-    newly_downloaded: List[Path] = []
-
-    for b in batches.data:
-        if only_completed and getattr(b, "status", None) != "completed":
-            continue
-
-        bid = b.id
         out_id = getattr(b, "output_file_id", None)
-        err_id = getattr(b, "error_file_id", None)
-
         if out_id:
             out_path = out_dir / f"{bid}_results.jsonl"
-            if out_path.exists():
-                print(f"[Skip] Output for {bid} already exists at {out_path}")
-            else:
+            if not out_path.exists():
                 stream = client.files.content(out_id)
                 with out_path.open("wb") as f:
                     f.write(stream.read())
                 print(f"[Download] {bid} -> {out_path}")
-                newly_downloaded.append(out_path)
+                new_outputs.append(out_path)
 
-        if include_errors and err_id:
+        err_id = getattr(b, "error_file_id", None)
+        if err_id:
             err_path = out_dir / f"{bid}_errors.jsonl"
-            if err_path.exists():
-                print(f"[Skip] Error file for {bid} already exists at {err_path}")
-            else:
+            if not err_path.exists():
                 estream = client.files.content(err_id)
                 with err_path.open("wb") as f:
                     f.write(estream.read())
                 print(f"[Errors]   {bid} -> {err_path}")
 
-    merged = work_dir / "api_responses.jsonl"
+    return new_outputs
 
-    # Decide how to (re)build the merged file
-    if merged.exists():
-        if newly_downloaded:
-            # Append only new outputs
-            with merged.open("ab") as out_f:
-                for p in newly_downloaded:
-                    with p.open("rb") as inp:
-                        out_f.write(inp.read())
-            print(f"[Append] Added {len(newly_downloaded)} new file(s) to {merged}")
-        else:
-            print("[Append] No new outputs to append; merged file unchanged.")
-    else:
-        # Build from ALL existing outputs if merged doesn't exist yet
-        all_outputs = sorted(out_dir.glob("*_results.jsonl"))
-        if not all_outputs:
-            print("No completed batches with output to download or merge yet.")
-            return newly_downloaded, None
-        with merged.open("wb") as out_f:
-            for p in all_outputs:
+def _append_and_dedupe(merged_path: Path, newly_downloaded: List[Path]) -> Tuple[int, int]:
+    """
+    Append new results to merged_path, then rewrite merged_path with unique custom_ids.
+    Returns (kept, dropped_dupes).
+    """
+    # Append
+    if newly_downloaded:
+        with merged_path.open("ab" if merged_path.exists() else "wb") as out_f:
+            for p in newly_downloaded:
                 with p.open("rb") as inp:
                     out_f.write(inp.read())
-        print(f"[Merge] Built merged file from {len(all_outputs)} outputs -> {merged}")
+        print(f"[Append] Added {len(newly_downloaded)} file(s) to {merged_path}")
 
-    return newly_downloaded, merged
+    # Deduplicate by custom_id (keep first occurrence)
+    seen: set[str] = set()
+    kept_lines: List[str] = []
+    dropped = 0
+
+    if merged_path.exists():
+        with merged_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                cid = str(rec.get("custom_id"))
+                if cid in seen:
+                    dropped += 1
+                    continue
+                seen.add(cid)
+                kept_lines.append(line)
+
+        # Rewrite file with uniques
+        tmp = merged_path.with_suffix(".jsonl.tmp")
+        with tmp.open("w", encoding="utf-8") as out:
+            out.writelines(kept_lines)
+        tmp.replace(merged_path)
+
+    print(f"[Dedupe] Unique={len(seen)} | Dropped dupes={dropped}")
+    return len(seen), dropped
+
+def load_case_results(path: str = "batch_runs/api_responses.jsonl") -> pd.DataFrame:
+    records = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+
+            if rec.get("error"):
+                continue
+            try:
+                content = rec["response"]["body"]["choices"][0]["message"]["content"]
+                obj = json.loads(content)  # parse the 9-key JSON
+            except Exception:
+                continue
+
+            # Attach your own ID (custom_id)
+            obj["custom_id"] = rec.get("custom_id")
+
+            records.append(obj)
+
+    return pd.DataFrame.from_records(records)
+
+# --- main one-call function -------------------------------------------------
+def run_incremental_batches(
+    df,
+    *,
+    work_dir:               str | Path = "batch_runs",
+    full_input_name:        str = "input_api_format.jsonl",
+    missing_input_name:     str = "input_missing.jsonl",
+    endpoint:               str = "/v1/chat/completions",
+    completion_window:      str = "24h",
+    max_bytes:              int = 200 * 1024 * 1024,
+    poll:                   bool = False,           # set True if you want to wait & download now
+) -> None:
+    """
+    Full incremental pipeline:
+      - build full input JSONL (for reference/inspection)
+      - read existing merged outputs: batch_runs/api_responses.jsonl
+      - create input_missing.jsonl (only not-yet-answered custom_ids)
+      - split, upload, create batches
+      - optionally poll + download
+      - append new outputs into api_responses.jsonl, then dedupe
+    """
+    work = Path(work_dir)
+    inputs_dir  = work / "input_chunks"
+    outputs_dir = work / "output"
+    merged_path = work / "api_responses.jsonl"
+    full_input  = work / full_input_name
+    miss_input  = work / missing_input_name
+
+    # 1: Build full input JSONL
+    ###############################################################################################
+    total               = _build_full_input(df, full_input) 
+
+    # 2: Already-done custom_ids
+    ###############################################################################################
+    done_ids            = _collect_done_ids(merged_path)
+    print(f"[State] Already answered: {len(done_ids)} / {total}")
+
+    # 3: Build missing-only JSONL
+    ###############################################################################################
+    new_count           = _write_missing_only(df, done_ids, miss_input)
+    if new_count == 0:
+        print("[Done] Everything already answered. Just dedup/clean the merged file.")
+        _append_and_dedupe(merged_path, newly_downloaded=[])
+        return
+
+    # 4: Split missing-only file into <=200MB chunks
+    ###############################################################################################
+    parts               = _split_by_size(miss_input, inputs_dir, prefix="input_chunk", max_bytes=max_bytes)
+
+    # 5: Enqueue batches
+    ###############################################################################################
+    batch_ids           = _enqueue_chunks(parts, endpoint=endpoint, completion_window=completion_window)
+    print(f"[Enqueued] {len(batch_ids)} batch(es): {batch_ids}")
+
+    # 6: Optionally poll/download now, then append & dedupe
+    ###############################################################################################
+    new_outputs         = _download_new_outputs(batch_ids, outputs_dir, poll=poll)
+    kept, dropped       = _append_and_dedupe(merged_path, newly_downloaded=new_outputs)
+    print(f"[Final] merged={merged_path} | unique={kept} | dropped_dupes={dropped}")
+# ============================================================================
 
 if __name__ == "__main__":
-    # df = build_cap_dataset()
-    # final_path = run_API_batch_inference(
-    #     input_file="input_api_format.jsonl",
-    #     max_bytes=200 * 1024 * 1024,
-    #     output_dir="input",
-    #     output_prefix="response_part",
-    #     endpoint="/v1/chat/completions",       
-    #     completion_window="24h",
-    #     work_dir="batch_runs",
-    #     df=df
-
-    newly_downloaded, merged = download_and_merge_batch_outputs(work_dir="batch_runs", include_errors=True, only_completed=True)
+    df = build_cap_dataset()
+    run_incremental_batches(
+        df,
+        work_dir="batch_runs",
+        endpoint="/v1/chat/completions",
+        completion_window="24h",
+        max_bytes=200*1024*1024,
+        poll=False,   # set True if you want to wait for completion & auto-download now
+    )
