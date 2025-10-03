@@ -217,3 +217,4 @@ batch_runs/
 *.json
 *.jsonl
 .env
+.cl_cache
