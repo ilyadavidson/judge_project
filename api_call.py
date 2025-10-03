@@ -90,6 +90,29 @@ class BatchRequest:
             "body":         self.body,
         }
 
+def _extract_text(resp: dict):
+    if not isinstance(resp, dict):
+        return None
+    body = resp.get("body")
+    if isinstance(body, dict):
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices:
+            return choices[0]["message"]["content"]
+    # responses API shapes (fallbacks)
+    if isinstance(resp.get("output_text"), str):
+        return resp["output_text"]
+    out = resp.get("output")
+    if isinstance(out, list):
+        parts = []
+        for msg in out:
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for part in content:
+                    t = part.get("text")
+                    if t: parts.append(t)
+        return "".join(parts) if parts else None
+    return None
+
 def _collect_done_ids(output_file: Path) -> set[str]:
     """Returns set of case ids that have already been processed in the final output file."""
     done_ids = set()

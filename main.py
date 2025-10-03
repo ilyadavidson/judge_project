@@ -8,6 +8,7 @@ import json
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing           import normalize
+from typing                         import Callable
 
 from helper_functions                import split_on_v, _find_docket_in_text, _norm_docket, _candidate_judge_names, _text_contains_any, normalize_case_name, norm_id
 from helper_functions                import split_normalize_dockets, extract_all_dockets
@@ -18,7 +19,7 @@ from api_call                        import _extract_text
 # Mapping appellate judges to district judges
 ###################################################################################
 def build_district_tfidf_index(     df:         pd.DataFrame = None, 
-                                    nrm:        function = normalize_case_name, 
+                                    nrm:        Callable = normalize_case_name, 
                                     analyzer:   str = "word", 
                                     min_df:     int = 1, 
                                     max_df:     float = 0.8, 
