@@ -97,9 +97,12 @@ def text_builder(df, limit, mx_tk):
     return results
 
 def court_listener_cleaner(
-    df: pd.DataFrame,
+    df: pd.DataFrame,                     # court_listener dataframe
     judges_info: Optional[pd.DataFrame] = None,
-    text_col: str = "combined_preview",      # change if your column name differs
+    text_col: str = "combined_preview",
+    source_df: Optional[pd.DataFrame] = None,   # your "cases" df
+    source_docket_col: str = "docket_number",
+    source_uid_col: str = "unique_id",
 ) -> pd.DataFrame:
     """
     Parse CourtListener preview text to extract district judge & court, then map to judge id.
@@ -295,5 +298,19 @@ def court_listener_cleaner(
 
     # Normalize dtype of 'judge id' to nullable Int64
     out["judge id"] = pd.to_numeric(out["judge id"], errors="coerce").astype("Int64")
+
+    if source_df is not None and source_docket_col in source_df.columns:
+        # Preload all source dockets + ids
+        src_pairs = source_df[[source_docket_col, source_uid_col]].dropna().astype(str).values.tolist()
+
+        def find_unique_id(docket: str):
+            if not isinstance(docket, str):
+                return pd.NA
+            for sd, uid in src_pairs:
+                if docket in sd or sd in docket:
+                    return uid   # take the first overlapping match
+            return pd.NA
+
+        out["unique_id"] = out["docket_number"].astype(str).apply(find_unique_id).astype("string")
 
     return out
