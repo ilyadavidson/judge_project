@@ -390,6 +390,111 @@ def run_incremental_batches(
     print(f"[Final] merged={merged_path} | unique={kept} | dropped_dupes={dropped}")
 # ============================================================================
 
+# ---------- Config ----------
+INPUT_PATH          = Path("batch_runs/overlap_input.jsonl")   # already created
+OUTPUT_DIR          = Path("batch_runs/overlap_outputs")       # NEW folder for this run
+MERGED_RESULTS_PATH = OUTPUT_DIR / "overlap_results.jsonl"     # NEW results file
+ENDPOINT            = "/v1/chat/completions"                    # or "/v1/responses" if you used Responses API in the input
+COMPLETION_WINDOW   = "24h"                                     # typical batch window; adjust as needed
+POLL                = True                                      # set False if you don't want to poll
+POLL_INTERVAL       = 20                                        # seconds
+
+
+def enqueue_single_file(inp: Path, endpoint: str, completion_window: str) -> str:
+    """Upload one JSONL and create a single batch. Returns batch_id."""
+    load_dotenv()
+    client = OpenAI()
+    with inp.open("rb") as fh:
+        file_obj = client.files.create(file=fh, purpose="batch")
+    batch = client.batches.create(
+        input_file_id     = file_obj.id,
+        endpoint          = endpoint,
+        completion_window = completion_window,
+        metadata          = {"description": f"Batch for {inp.name}"},
+    )
+    print(f"[Batch] Created {batch.id} for {inp.name}")
+    return batch.id
+
+
+def download_outputs_for_batch(batch_id: str, out_dir: Path, poll: bool, poll_interval: int = 20) -> Tuple[Optional[Path], Optional[Path]]:
+    """
+    Optionally poll a single batch to completion, then download outputs/errors.
+    Returns (results_path, errors_path) — either may be None if not present.
+    """
+    load_dotenv()
+    client = OpenAI()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    terminal = {"completed", "failed", "cancelled", "expired"}
+    while True:
+        b = client.batches.retrieve(batch_id)
+        st = getattr(b, "status", None)
+        print(f"[Poll] {batch_id} status={st}")
+        if not poll or st in terminal:
+            break
+        time.sleep(poll_interval)
+
+    results_path = None
+    errors_path  = None
+
+    out_id = getattr(b, "output_file_id", None)
+    if out_id:
+        results_path = out_dir / f"{batch_id}_results.jsonl"
+        if not results_path.exists():  # don't clobber if re-running
+            stream = client.files.content(out_id)
+            with results_path.open("wb") as f:
+                f.write(stream.read())
+        print(f"[Download] results -> {results_path}")
+
+    err_id = getattr(b, "error_file_id", None)
+    if err_id:
+        errors_path = out_dir / f"{batch_id}_errors.jsonl"
+        if not errors_path.exists():
+            stream = client.files.content(err_id)
+            with errors_path.open("wb") as f:
+                f.write(stream.read())
+        print(f"[Download] errors  -> {errors_path}")
+
+    return results_path, errors_path
+
+
+def merge_fresh_results(merged_path: Path, batch_result_files: List[Path]) -> Tuple[int, int]:
+    """
+    Write a brand-new merged file only from the provided batch_result_files.
+    Dedupes by custom_id within these files. Does NOT read or touch old outputs.
+    Returns (unique_kept, dropped_dupes_within_these_files).
+    """
+    seen: set[str] = set()
+    kept_lines: List[str] = []
+    dropped = 0
+
+    for p in batch_result_files:
+        if not p or not p.exists():
+            continue
+        with p.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                cid = str(rec.get("custom_id"))
+                if cid in seen:
+                    dropped += 1
+                    continue
+                seen.add(cid)
+                kept_lines.append(line)
+
+    merged_path.parent.mkdir(parents=True, exist_ok=True)
+    with merged_path.open("w", encoding="utf-8") as out:
+        out.writelines(kept_lines)
+
+    print(f"[Merge] Wrote {merged_path} | Unique={len(seen)} | Dropped dupes={dropped}")
+    return len(seen), dropped
+
+
+
 if __name__ == "__main__":
     df = build_cap_dataset()
     run_incremental_batches(
@@ -400,3 +505,16 @@ if __name__ == "__main__":
         max_bytes=200*1024*1024,
         poll=False,   # set True if you want to wait for completion & auto-download now
     )
+
+    # overlap api call
+    # batch_id = enqueue_single_file(INPUT_PATH, ENDPOINT, COMPLETION_WINDOW)
+
+    # # 2) (optional) poll & download this batch's outputs/errors ONLY into the new folder
+    # res_path, err_path = download_outputs_for_batch(batch_id, OUTPUT_DIR, poll=POLL, poll_interval=POLL_INTERVAL)
+
+    # # 3) Merge just-downloaded results into a new, isolated merged file
+    # #    (This does NOT read any old outputs; it only uses this run's files.)
+    # present = [p for p in [res_path] if p is not None]
+    # merge_fresh_results(MERGED_RESULTS_PATH, present)
+
+    # print(f"\nDone. Your fresh results are in: {MERGED_RESULTS_PATH}")
