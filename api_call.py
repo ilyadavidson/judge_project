@@ -507,6 +507,14 @@ if __name__ == "__main__":
     )
 
     # overlap api call
+    # input_path = Path("batch_runs/overlap_input.jsonl")
+    # cl = pd.read_csv('third_circuit_on_appeal.csv')
+    # cl = cl[cl['docket_number'].notna()] # remove nas
+    # cl = cl.drop_duplicates(subset="docket_number", keep="first") # drop dupes
+    # cl_non_overlap = cl[cl['overlap_by_substring']==False]
+    # cl_non_overlap = cl_non_overlap.rename(columns={'combined_preview': 'opinion_text', 'cluster_id': 'unique_id'})
+    # cl_non_overlap['is_appellate'] = 1
+    # _build_full_input(cl_non_overlap, input_path)
     # batch_id = enqueue_single_file(INPUT_PATH, ENDPOINT, COMPLETION_WINDOW)
 
     # # 2) (optional) poll & download this batch's outputs/errors ONLY into the new folder
