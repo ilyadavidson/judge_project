@@ -329,6 +329,42 @@ def load_case_results(path: str = "batch_runs/api_responses.jsonl") -> pd.DataFr
 
     return pd.DataFrame.from_records(records)
 
+ # ----- Helper to read/parse a JSONL of batch results -----
+def _read_batch_jsonl(path: str) -> dict[str, str]:
+    """
+    Returns {custom_id -> opinion_string_lower} from a JSONL results file.
+    Safely ignores bad lines or missing fields.
+    """
+    out: dict[str, str] = {}
+    if not path:
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if rec.get("error"):
+                    continue
+                txt = _extract_text(rec.get("response", {}))
+                if not txt:
+                    continue
+                try:
+                    obj = json.loads(txt)
+                except json.JSONDecodeError:
+                    continue
+                opinion = (obj.get("opinion") or "").strip().lower()
+                cid     = str(rec.get("custom_id") or "")
+                if cid:
+                    # keep first seen (stable) — avoids flip-flopping if duplicates exist
+                    out.setdefault(cid, opinion)
+    except FileNotFoundError:
+        pass
+    return out
+
 # --- main one-call function -------------------------------------------------
 def run_incremental_batches(
     df,

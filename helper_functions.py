@@ -5,6 +5,7 @@ Helper functions for appellate_mapping
 import re
 import pandas as pd
 import tiktoken
+import re, unicodedata
 import matplotlib.pyplot as plt
 
 def split_on_v(name: str):
@@ -259,3 +260,59 @@ def plot_distributions(df, columns):
     
     plt.tight_layout()
     plt.show()
+
+# -------- helpers --------
+_canon     = lambda s: re.sub(r'[^a-z]', '', unicodedata.normalize('NFKD', str(s or '')).lower())
+_first_tok = lambda s: re.sub(r'\.$', '', next((t for t in str(s).split() if t), '')).lower()
+_pat_judge = re.compile(r'(?is)District\s+Judge:\s*([^\r\n]+)')
+_strip     = lambda s: re.sub(r'\s+', ' ', re.sub(r'(?is)(the\s+honorable|hon\.?|chief|\(.*?\)|[\*\u2020\u2021])', '', str(s or ''))).strip(' ,;')
+
+def _extract_court(txt: str) -> str:
+    t = str(txt or '')
+    for pat in (
+        r'(?is)\bIN\s+THE\s+(?:UNITED\s+STATES\s+)?DISTRICT\s+COURT(?:\s+FOR\s+THE)?\s+([A-Z][^\n,]+)',
+        r'(?is)\bUnited\s+States\s+District\s+Court\s+for\s+the\s+([^\n,]+)',
+        r'(?is)\bU\.\s*S\.\s*District\s+Court\s+for\s+the\s+([^\n,]+)',
+    ):
+        m = re.search(pat, t)
+        if m: return _strip(m.group(1))
+    return ''
+
+# -------- name/id/court extractor --------
+def judge_name_to_id(cl_data: pd.DataFrame, judges_info: pd.DataFrame, what: str, text_col: str = "combined_preview") -> pd.Series:
+    out = cl_data[[text_col]].copy()
+    out["district judge_full"] = out[text_col].map(lambda t: _strip(_pat_judge.search(str(t)).group(1)) if _pat_judge.search(str(t)) else '')
+    out["district judge"]      = out["district judge_full"].str.split().str[-1].str.lower()
+    out["last_key"]            = out["district judge"].map(_canon)
+    out["court_full"]          = out[text_col].map(_extract_court)
+    out["court_key"]           = out["court_full"].map(_canon)
+
+    ji = judges_info.copy()
+    ji["last_key"]  = ji["last name"].map(_canon)
+    ji["first_key"] = ji["first name"].map(lambda x: _canon(_first_tok(x)))
+    ji["court_key"] = ji["court name"].map(_canon)
+    ji["jid"]       = pd.to_numeric(ji["judge id"], errors="coerce").astype("Int64")
+
+    def _resolve_id(row):
+        subset = ji[ji["last_key"] == row["last_key"]]
+        if len(subset) == 1:
+            return subset["jid"].iloc[0]
+        first, courtk = _canon(_first_tok(row["district judge_full"])), row["court_key"]
+        s2 = subset[subset["first_key"] == first]
+        if len(s2) == 1:
+            return s2["jid"].iloc[0]
+        if len(s2) > 1 and courtk:
+            s3 = s2[s2["court_key"].apply(lambda x: bool(x) and (courtk in x or x in courtk))]
+            if len(s3): return s3["jid"].iloc[0]
+        return pd.NA
+
+    key = what.strip().lower()
+    if key in {"id","jid","judge id"}:
+        return out.apply(_resolve_id, axis=1).astype("Int64").reindex(cl_data.index)
+    if key in {"last name","last","lastname"}:
+        return out["district judge"].reindex(cl_data.index)
+    if key in {"name","full name","fullname"}:
+        return out["district judge_full"].reindex(cl_data.index)
+    if key in {"court","court name"}:
+        return out["court_full"].reindex(cl_data.index)
+    raise ValueError("`what` must be one of: 'id', 'last name', 'name', 'court'.")

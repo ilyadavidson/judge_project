@@ -9,6 +9,9 @@ import re
 import unicodedata
 import pandas as pd
 from typing import Optional
+import json
+from helper_functions import norm_id
+from typing import Dict, List, Optional
 
 def _arrow_filter_table(files: list[str], courts: list[str]):
     """
@@ -314,3 +317,45 @@ def court_listener_cleaner(
         out["unique_id"] = out["docket_number"].astype(str).apply(find_unique_id).astype("string")
 
     return out
+
+def _load_mapping(path: str) -> Dict[str, str]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        d = {}
+    # normalize keys/vals to strings
+    out = {}
+    for k, v in d.items():
+        nk, nv = norm_id(k), norm_id(v)
+        if nk and nv:
+            out[nk] = nv
+    return out
+
+def promotion_info_judges(judge_info):
+    """
+    Returns a df of all judges who got promoted from district to appellate courts. Their promotion date is the earliest nomination date that they got to the appellate court. 
+    """
+    ji                  = judge_info.copy()
+
+    ji["court type"]    = ji["court type"].astype(str).str.lower()
+
+    dj                  = ji[ji["court type"].str.contains("district", na=False)]
+    aj                  = ji[ji["court type"].str.contains("appeal|circuit", na=False)]
+
+    aj["nomination date"] = pd.to_datetime(aj["nomination date"], errors="coerce")
+    promo_dates = (
+        aj.sort_values(["judge id", "nomination date"])
+          .groupby("judge id")["nomination date"]
+          .first()
+    )
+
+    ji_district = (
+        dj.drop_duplicates("judge id")
+          .assign(
+              is_promoted=lambda d: d["judge id"].isin(promo_dates.index).astype(int),
+              promotion_date=lambda d: d["judge id"].map(promo_dates)
+          )
+    )
+
+    return ji_district
