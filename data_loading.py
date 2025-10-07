@@ -64,11 +64,13 @@ def build_cap_dataset(
     df["unique_id"] = df.index.astype(str)
     df["is_appellate"] = np.where(df["court_name"].str.contains("Appeals", case=False, na=False), 1, 0)
 
-    # Delete duplicates based on opinion type and docket number
+    # Delete duplicates based on opinion type and docket number and keeps the one with majority vote
     ############################################################################################################
-    df = df.drop_duplicates(
-    subset=["docket_number", "opinion_type"],
-    keep="first")
+    df = (
+    df.sort_values("opinion_type", key=lambda s: s.str.lower().eq("majority"), ascending=False)
+      .drop_duplicates(subset=["docket_number"], keep="first")
+      .reset_index(drop=True)
+    )
 
     return df
 

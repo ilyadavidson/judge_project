@@ -10,6 +10,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing           import normalize
 from typing                         import Callable
 
+import importlib
+import helper_functions
+importlib.reload(helper_functions)
 from helper_functions                import split_on_v, _find_docket_in_text, _norm_docket, _candidate_judge_names, _text_contains_any, normalize_case_name, norm_id
 from helper_functions                import split_normalize_dockets, extract_all_dockets
 from data_loading                    import build_cap_dataset
@@ -412,9 +415,35 @@ def compute_district_overturns(
 
     return pj
 
+def keep_majority_for_appellate(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    For appellate cases (is_appellate == 1), keep only one record per unique_id group:
+    if duplicates exist, keep the one where opinion_type == 'majority'.
+    All non-appellate cases are kept as-is.
+    """
+    df = df.copy()
+    
+
+    df["opinion_type"] = df["opinion_type"].astype(str).str.lower().str.strip()
+    appellate = df[df["is_appellate"] == 1]
+    non_appellate = df[df["is_appellate"] != 1]
+    if "docket_number" in df.columns:
+        keep_cols = list(df.columns)
+        appellate = (
+            appellate.sort_values(["docket_number", "opinion_type"], ascending=[True, True])
+            .groupby("docket_number", as_index=False, group_keys=False)
+            .apply(lambda g: g[g["opinion_type"] == "majority"].iloc[0]
+                   if (g["opinion_type"] == "majority").any() else g.iloc[0])
+            .reset_index(drop=True)
+        )[keep_cols]
+    else:
+        raise KeyError("DataFrame must contain a 'unique_id' column for identifying duplicates.")
+
+    return pd.concat([non_appellate, appellate], ignore_index=True)
 
 if __name__ == "__main__":
     df                  = build_cap_dataset()
+    df                  = keep_majority_for_appellate(df)
     judge_info          = pd.read_csv("data/judge_info.csv")
     whole_index         = build_district_tfidf_index(df, nrm=normalize_case_name, side=False)
     side_index          = build_district_tfidf_index(df, nrm=normalize_case_name, side=True)
