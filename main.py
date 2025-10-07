@@ -260,7 +260,7 @@ def run_appellate_linking(df,
                           side_threshold    = 0.7, 
                           score_low         = 0.5, 
                           score_high        = 0.8, 
-                          out_json_path     = "appellate_matches.json"):
+                          out_json_path     = "appellate_matches2.json"):
     """
     Orchestrates the full pipeline of appellate mapping.
     Returns (best_matches_df, confirmed_df).
@@ -309,10 +309,10 @@ def run_appellate_linking(df,
     combined_dict = {}
 
     for rec in high.to_dict(orient="records"):
-        combined_dict[rec["appellate_index"]] = rec["district_index"]
+        combined_dict[str(df.at[rec["appellate_index"], "unique_id"])] = str(df.at[rec["district_index"], "unique_id"])
 
     for rec in confirmed_only.to_dict(orient="records"):
-        combined_dict[rec["appellate_index"]] = rec["district_index"]
+        combined_dict[str(df.at[rec["appellate_index"], "unique_id"])] = str(df.at[rec["district_index"], "unique_id"])
 
     with open(out_json_path, "w", encoding="utf-8") as f:
         json.dump(combined_dict, f, ensure_ascii=False, indent=2)
@@ -416,12 +416,12 @@ def compute_district_overturns(
 if __name__ == "__main__":
     df                  = build_cap_dataset()
     judge_info          = pd.read_csv("data/judge_info.csv")
-    # whole_index         = build_district_tfidf_index(df, nrm=normalize_case_name, side=False)
-    # side_index          = build_district_tfidf_index(df, nrm=normalize_case_name, side=True)
-    # run_appellate_linking(df, whole_index, side_index)
-    # print("Appellate matching done")
-    promoted_judges     = judges_promoted_from_district(judge_info)
-    pj_stats            = compute_district_overturns(df, judge_info,
-                                      api_path="batch_runs/api_responses.jsonl",
-                                      mapping_path="results/appellate_matches.json")
-    pj_stats.to_csv("results/promoted_judge_stats.csv", index=False)
+    whole_index         = build_district_tfidf_index(df, nrm=normalize_case_name, side=False)
+    side_index          = build_district_tfidf_index(df, nrm=normalize_case_name, side=True)
+    run_appellate_linking(df, whole_index, side_index)
+    print("Appellate matching done")
+    # promoted_judges     = judges_promoted_from_district(judge_info)
+    # pj_stats            = compute_district_overturns(df, judge_info,
+    #                                   api_path="batch_runs/api_responses.jsonl",
+    #                                   mapping_path="results/appellate_matches.json")
+    # pj_stats.to_csv("results/promoted_judge_stats.csv", index=False)

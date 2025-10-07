@@ -63,6 +63,13 @@ def build_cap_dataset(
     ############################################################################################################
     df["unique_id"] = df.index.astype(str)
     df["is_appellate"] = np.where(df["court_name"].str.contains("Appeals", case=False, na=False), 1, 0)
+
+    # Delete duplicates based on opinion type and docket number
+    ############################################################################################################
+    df = df.drop_duplicates(
+    subset=["docket_number", "opinion_type"],
+    keep="first")
+
     return df
 
 enc = tiktoken.get_encoding("o200k_base")
