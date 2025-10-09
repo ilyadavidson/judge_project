@@ -14,8 +14,8 @@ import pandas       as pd
 
 from dotenv         import load_dotenv
 from openai         import OpenAI
-
 from data_loading   import build_cap_dataset, text_builder, truncate_opinion
+
 
 system_msg          = (
     "You are a legal assistant. Your task has seven parts, and you must return JSON only with the required keys.\n\n"
@@ -427,9 +427,9 @@ def run_incremental_batches(
 # ============================================================================
 
 # ---------- Config ----------
-INPUT_PATH          = Path("batch_runs/overlap_input.jsonl")   # already created
-OUTPUT_DIR          = Path("batch_runs/overlap_outputs")       # NEW folder for this run
-MERGED_RESULTS_PATH = OUTPUT_DIR / "overlap_results.jsonl"     # NEW results file
+INPUT_PATH          = Path("batch_runs/overlap_input2.jsonl")   # already created
+OUTPUT_DIR          = Path("batch_runs/overlap2_outputs")       # NEW folder for this run
+MERGED_RESULTS_PATH = OUTPUT_DIR / "overlap2_results.jsonl"     # NEW results file
 ENDPOINT            = "/v1/chat/completions"                    # or "/v1/responses" if you used Responses API in the input
 COMPLETION_WINDOW   = "24h"                                     # typical batch window; adjust as needed
 POLL                = True                                      # set False if you don't want to poll
@@ -529,18 +529,194 @@ def merge_fresh_results(merged_path: Path, batch_result_files: List[Path]) -> Tu
     print(f"[Merge] Wrote {merged_path} | Unique={len(seen)} | Dropped dupes={dropped}")
     return len(seen), dropped
 
+import json, os
+from pathlib import Path
+import pandas as pd
+
+# ---------- core helpers ----------
+
+def _existing_custom_ids(jsonl_path: str | Path) -> set[str]:
+    """Return the set of custom_id values already present in a JSONL file (input or results)."""
+    ids = set()
+    p = Path(jsonl_path)
+    if not p.exists():
+        return ids
+    with p.open("r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+                cid = rec.get("custom_id")
+                if cid is not None:
+                    ids.add(str(cid))
+            except Exception:
+                # ignore malformed lines
+                continue
+    return ids
 
 
-if __name__ == "__main__":
-    df = build_cap_dataset()
-    run_incremental_batches(
-        df,
-        work_dir="batch_runs",
-        endpoint="/v1/chat/completions",
-        completion_window="24h",
-        max_bytes=200*1024*1024,
-        poll=False,   # set True if you want to wait for completion & auto-download now
+def append_new_requests(
+    df: pd.DataFrame,
+    input_jsonl: str | Path,
+    build_request_fn,
+    id_getter=None,
+) -> int:
+    """
+    Append only NEW requests to `input_jsonl`.
+    - df: your cl_extracted (or any DF you want to send)
+    - input_jsonl: path to overlap_input2.jsonl
+    - build_request_fn: function(custom_id:str, row:pd.Series) -> dict  (your existing builder)
+    - id_getter: optional function(idx:int, row:pd.Series) -> str custom_id
+                 If None, uses the DataFrame index as custom_id (stringified).
+                 If your 'unique_id' is like 'CL_123', and your batch expects '123',
+                 you can do: id_getter=lambda i, r: str(r['unique_id']).replace("CL_","",1)
+    Returns the number of requests appended.
+    """
+    input_jsonl = Path(input_jsonl)
+    existing = _existing_custom_ids(input_jsonl)
+    appended = 0
+
+    # default: use index as custom_id
+    if id_getter is None:
+        id_getter = lambda i, r: str(i)
+
+    # open in append mode; create file if missing
+    input_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    with input_jsonl.open("a", encoding="utf-8") as out:
+        for idx, row in df.iterrows():
+            custom_id = id_getter(idx, row)
+            if custom_id in existing:
+                continue
+            payload = build_request_fn(custom_id, row)
+            # ensure the JSON has custom_id included (your builder should do this, but double-set to be safe)
+            payload["custom_id"] = custom_id
+            out.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            appended += 1
+            existing.add(custom_id)  # avoid double-appending within this call
+
+    return appended
+
+
+def append_results_unique(incoming_results_jsonl: str | Path, master_results_jsonl: str | Path) -> int:
+    """
+    Append only NEW result lines (by custom_id) from `incoming_results_jsonl`
+    into `master_results_jsonl` (e.g., cl_scrape_results.jsonl).
+    Returns number of result records appended.
+    """
+    incoming_results_jsonl = Path(incoming_results_jsonl)
+    master_results_jsonl = Path(master_results_jsonl)
+
+    if not incoming_results_jsonl.exists():
+        return 0
+
+    master_ids = _existing_custom_ids(master_results_jsonl)
+    appended = 0
+
+    master_results_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    with incoming_results_jsonl.open("r", encoding="utf-8") as src, \
+         master_results_jsonl.open("a", encoding="utf-8") as dst:
+        for line in src:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            cid = rec.get("custom_id")
+            if cid is None:
+                continue
+            scid = str(cid)
+            if scid in master_ids:
+                continue
+            dst.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            master_ids.add(scid)
+            appended += 1
+
+    return appended
+
+def _df_with_ids(df: pd.DataFrame, id_getter) -> pd.DataFrame:
+    """Return a copy with a 'custom_id' column computed by id_getter(idx,row)."""
+    out = df.copy()
+    out["__idx__"] = range(len(out))
+    out["custom_id"] = [id_getter(i, r) for i, r in out.iterrows()]
+    return out
+
+def _write_jsonl_for_ids(df: pd.DataFrame, jsonl_path: str | Path, id_getter, build_request_fn) -> int:
+    """Write a fresh JSONL with just these rows, using custom_id from id_getter."""
+    jsonl_path = Path(jsonl_path)
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    cnt = 0
+    with jsonl_path.open("w", encoding="utf-8") as out:
+        for idx, row in df.iterrows():
+            cid = id_getter(idx, row)
+            payload = build_request_fn(cid, row)
+            payload["custom_id"] = cid
+            out.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            cnt += 1
+    return cnt
+
+def run_cl_extracted_incremental():
+    """
+    1) Read cl_extracted.csv
+    2) Append any NEW ids to overlap_input2.jsonl (requests file)
+    3) Batch only ids NOT YET answered in cl_scrape_results.jsonl
+    4) Append new results into cl_scrape_results.jsonl
+    """
+    # --- load source
+    cl_extracted = pd.read_csv("cl_extracted.csv")
+
+    # --- how to compute custom_id from each row
+    id_getter = lambda i, r: str(r.get("unique_id", "")).replace("CL_", "", 1) or str(i)
+
+    # --- ensure requests file contains all df ids (append only new)
+    appended_reqs = append_new_requests(
+        df=cl_extracted,
+        input_jsonl="batch_runs/overlap_input2.jsonl",
+        build_request_fn=build_request_fn,
+        id_getter=id_getter,
     )
+    print(f"[Requests] Appended {appended_reqs} new requests into overlap_input2.jsonl")
+
+    # --- figure out which ids still need answers
+    df_with_ids = _df_with_ids(cl_extracted, id_getter)
+    all_ids_in_df   = set(df_with_ids["custom_id"].astype(str))
+    answered_ids    = _existing_custom_ids("cl_scrape_results.jsonl")
+    ids_to_query    = sorted(all_ids_in_df - answered_ids)
+
+    if not ids_to_query:
+        print("[Skip] No new ids to ask the API (everything already in cl_scrape_results.jsonl).")
+        return
+
+    # --- build a *temporary* JSONL containing only the missing ids
+    missing_df = df_with_ids[df_with_ids["custom_id"].isin(ids_to_query)]
+    tmp_missing_path = Path("batch_runs/overlap_input2_missing.jsonl")
+    n_missing = _write_jsonl_for_ids(missing_df, tmp_missing_path, id_getter, build_request_fn)
+    print(f"[Build] Missing-only: {n_missing} -> {tmp_missing_path}")
+
+    # --- enqueue this missing-only file, poll, download
+    batch_id = enqueue_single_file(tmp_missing_path, ENDPOINT, COMPLETION_WINDOW)
+    res_path, err_path = download_outputs_for_batch(batch_id, OUTPUT_DIR, poll=POLL, poll_interval=POLL_INTERVAL)
+
+    # --- merge downloaded results into the master results file (dedup by custom_id)
+    if res_path is not None:
+        added = append_results_unique(
+            incoming_results_jsonl=res_path,
+            master_results_jsonl="cl_scrape_results.jsonl",
+        )
+        print(f"[Results] Appended {added} new records into cl_scrape_results.jsonl")
+    else:
+        print("[Warn] No results file produced for this batch yet.")
+
+    # df = build_cap_dataset()
+    # run_incremental_batches(
+    #     df,
+    #     work_dir="batch_runs",
+    #     endpoint="/v1/chat/completions",
+    #     completion_window="24h",
+    #     max_bytes=200*1024*1024,
+    #     poll=False,   # set True if you want to wait for completion & auto-download now
+    # )
 
     # overlap api call
     # input_path = Path("batch_runs/overlap_input.jsonl")
@@ -562,3 +738,38 @@ if __name__ == "__main__":
     # merge_fresh_results(MERGED_RESULTS_PATH, present)
 
     # print(f"\nDone. Your fresh results are in: {MERGED_RESULTS_PATH}")
+
+    # overlap part 2
+def build_request_fn(custom_id: str, row: pd.Series) -> dict:
+    # Expect 'opinion_text' on the row
+    body = str(row.get("opinion_text", "") or "")
+    return BatchRequest(custom_id=custom_id, body=body).to_dict()
+
+if __name__ == "__main__":
+    from cl_data_maker import cl_loader
+    judges = pd.read_csv('data/judge_info.csv')
+    # however you load:
+    cl = cl_loader(judges)  # returns columns:
+    # ['_cid','name','docket_number','decision_date','opinion_text',
+    #  'district judge','district judge id','is_appellate','unique_id','overlap_by_substring']
+
+    # ensure id + opinion_text
+    cl = cl[cl["opinion_text"].notna()].copy()
+    if "id" not in cl.columns:
+        # use your unique_id, stripping the CL_ prefix the API does not expect
+        cl["id"] = cl["unique_id"].astype(str).str.replace("^CL_", "", regex=True)
+
+    # (optional) drop duplicates by id so you don’t resend
+    cl = cl.drop_duplicates(subset="id", keep="first")
+
+    # kick off the batch pipeline (uses your existing code paths)
+    run_incremental_batches(
+        cl,                              # must contain 'id' and 'opinion_text'
+        work_dir="batch_runs",
+        full_input_name="overlap_input2.jsonl",       # your chosen name
+        missing_input_name="overlap_input2_missing.jsonl",
+        endpoint="/v1/chat/completions",
+        completion_window="24h",
+        max_bytes=200*1024*1024,
+        poll=True                        # set False if you don’t want to wait for results now
+    )

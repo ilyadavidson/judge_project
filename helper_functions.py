@@ -262,35 +262,85 @@ def plot_distributions(df, columns):
     plt.show()
 
 # -------- helpers --------
-_canon     = lambda s: re.sub(r'[^a-z]', '', unicodedata.normalize('NFKD', str(s or '')).lower())
-_first_tok = lambda s: re.sub(r'\.$', '', next((t for t in str(s).split() if t), '')).lower()
-_pat_judge = re.compile(r'(?is)District\s+Judge:\s*([^\r\n]+)')
-_strip     = lambda s: re.sub(r'\s+', ' ', re.sub(r'(?is)(the\s+honorable|hon\.?|chief|\(.*?\)|[\*\u2020\u2021])', '', str(s or ''))).strip(' ,;')
 
-def _extract_court(txt: str) -> str:
-    t = str(txt or '')
-    for pat in (
-        r'(?is)\bIN\s+THE\s+(?:UNITED\s+STATES\s+)?DISTRICT\s+COURT(?:\s+FOR\s+THE)?\s+([A-Z][^\n,]+)',
-        r'(?is)\bUnited\s+States\s+District\s+Court\s+for\s+the\s+([^\n,]+)',
-        r'(?is)\bU\.\s*S\.\s*District\s+Court\s+for\s+the\s+([^\n,]+)',
-    ):
-        m = re.search(pat, t)
-        if m: return _strip(m.group(1))
-    return ''
+import re
+import pandas as pd
 
-# -------- name/id/court extractor --------
-def judge_name_to_id(cl_data: pd.DataFrame, judges_info: pd.DataFrame, what: str, text_col: str = "combined_preview") -> pd.Series:
+# --- helpers ---
+_pat_judge = re.compile(r"""(?ix)
+    (?:^|[^\w])                                   # boundary
+    (?:
+        # Form A: LAST, District Judge
+        (?P<a_last>[A-Z][A-Z'\-]+)                # ALLCAPS last often in captions
+        \s*,\s*District\s+Judge\b
+      |
+        # Form B: District Judge First M. Last
+        District\s+Judge\s+
+        (?P<b_full>(?:Hon\.?\s+)?[A-Z][\w.'\-]+(?:\s+[A-Z][\w.'\-]+){0,3})
+    )
+""")
+
+def _strip(s):
+    if s is None:
+        return ""
+    try:
+        # Handle pandas/NumPy NaN
+        import pandas as pd
+        if pd.isna(s):
+            return ""
+    except Exception:
+        pass
+    return str(s).strip()
+
+def _first_tok(s):
+    s = _strip(s)
+    return s.split()[0] if s else ""
+
+def _canon(s):
+    s = _strip(s).lower()
+    return re.sub(r"[^a-z]", "", s)
+
+def _extract_court(text: str) -> str:
+    m = re.search(r"United\s+States\s+District\s+Judge\s+for\s+the\s+([^,]+)", str(text or ""), flags=re.I)
+    return _strip(m.group(1)) if m else ""
+
+def _extract_judge_full(text: str) -> str:
+    if not text:
+        return ""
+    m = _pat_judge.search(str(text))
+    if not m:
+        return ""
+    if m.group("b_full"):
+        return _strip(re.sub(r"^Hon\.?\s+", "", m.group("b_full"), flags=re.I))
+    return _strip(m.group("a_last").title())  # e.g., 'KELLY' -> 'Kelly'
+
+# --- main ---
+def judge_name_to_id(
+    cl_data: pd.DataFrame,
+    judges_info: pd.DataFrame,
+    what: str,
+    text_col: str = "combined_preview"
+) -> pd.Series:
+    """
+    Extract the district judge name/court from opinion text and resolve to judge id when possible.
+
+    'what' in {'id','jid','judge id','last name','last','lastname','name','full name','fullname','court','court name'}
+    """
     out = cl_data[[text_col]].copy()
-    out["district judge_full"] = out[text_col].map(lambda t: _strip(_pat_judge.search(str(t)).group(1)) if _pat_judge.search(str(t)) else '')
+    out["district judge_full"] = out[text_col].map(_extract_judge_full)
+
+    # ↓ ensure safe strings before splitting/mapping
+    out["district judge_full"] = out["district judge_full"].fillna("")
     out["district judge"]      = out["district judge_full"].str.split().str[-1].str.lower()
-    out["last_key"]            = out["district judge"].map(_canon)
+    out["last_key"]            = out["district judge"].fillna("").map(_canon)
+
     out["court_full"]          = out[text_col].map(_extract_court)
-    out["court_key"]           = out["court_full"].map(_canon)
+    out["court_key"]           = out["court_full"].fillna("").map(_canon)
 
     ji = judges_info.copy()
-    ji["last_key"]  = ji["last name"].map(_canon)
-    ji["first_key"] = ji["first name"].map(lambda x: _canon(_first_tok(x)))
-    ji["court_key"] = ji["court name"].map(_canon)
+    ji["last_key"]  = ji["last name"].fillna("").map(_canon)
+    ji["first_key"] = ji["first name"].fillna("").map(lambda x: _canon(_first_tok(x)))
+    ji["court_key"] = ji["court name"].fillna("").map(_canon)
     ji["jid"]       = pd.to_numeric(ji["judge id"], errors="coerce").astype("Int64")
 
     def _resolve_id(row):
@@ -303,7 +353,8 @@ def judge_name_to_id(cl_data: pd.DataFrame, judges_info: pd.DataFrame, what: str
             return s2["jid"].iloc[0]
         if len(s2) > 1 and courtk:
             s3 = s2[s2["court_key"].apply(lambda x: bool(x) and (courtk in x or x in courtk))]
-            if len(s3): return s3["jid"].iloc[0]
+            if len(s3):
+                return s3["jid"].iloc[0]
         return pd.NA
 
     key = what.strip().lower()
@@ -315,4 +366,123 @@ def judge_name_to_id(cl_data: pd.DataFrame, judges_info: pd.DataFrame, what: str
         return out["district judge_full"].reindex(cl_data.index)
     if key in {"court","court name"}:
         return out["court_full"].reindex(cl_data.index)
-    raise ValueError("`what` must be one of: 'id', 'last name', 'name', 'court'.")
+    raise ValueError("what must be one of: 'id', 'last name', 'name', 'court'.")
+
+import re, pandas as pd, unicodedata
+
+def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame) -> pd.DataFrame:
+    """Add 'district judge' (last name, lowercase) and 'district judge id' (Int64) to cl_data."""
+    # --- helpers ---
+    def _norm(s):  # normalize for matching
+        return unicodedata.normalize("NFKD", str(s or "")).strip()
+
+    def _canon(s):  # canonical key: lowercase letters only
+        return re.sub(r"[^a-z]", "", _norm(s).lower())
+
+    def _strip_honorifics(s):
+        s = re.sub(r"(?i)\b(the\s+)?honorable\b|^hon\.?\s*", "", _norm(s))
+        s = re.sub(r"\s+", " ", s).strip(" ,;")
+        return s
+
+    SUFFIX = {"jr", "sr", "ii", "iii", "iv", "v"}
+    def _split_name(full):
+        # keep only word-ish tokens; drop suffixes at end
+        toks = re.findall(r"[A-Za-z][A-Za-z'\.-]*", _strip_honorifics(full))
+        while toks and toks[-1].rstrip(".").lower() in SUFFIX:
+            toks.pop()
+        if not toks: 
+            return "", ""
+        first = re.sub(r"\.$", "", toks[0])
+        last  = re.sub(r"\.$", "", toks[-1])
+        return first, last
+
+    # patterns (non-greedy, stop at line end; forbid digits in names)
+    # 1) "District Judge: Hon. Jennifer P. Wilson"
+    pat_after = re.compile(
+        r"(?im)\bdistrict\s+judge\b[:\s,]*"
+        r"(?:(?:the\s+)?honorable|hon\.)?\s*"
+        r"(?P<name>[A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*$"
+    )
+    # 2) "SCIRICA, District Judge."
+    pat_before = re.compile(
+        r"(?im)(?P<name>[A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*,\s*(?:U\.S\.\s*)?district\s+judge\b"
+    )
+    # 3) looser single-line fallback near "District Judge"
+    pat_line = re.compile(
+        r"(?im)^(?P<line>.*\bdistrict\s+judge\b.*)$"
+    )
+    # court: "United States District Court for the Middle District of Pennsylvania"
+    pat_court = re.compile(
+        r"(?im)(?:on\s+)?appeal\s+from\s+the\s+united\s+states\s+district\s+court\s+for\s+the\s+(?P<court>[^\r\n,]+)"
+    )
+
+    def _extract_name(txt: str) -> str:
+        if not txt: return ""
+        # prefer exact one-line “after” form
+        for m in pat_after.finditer(txt):
+            return _strip_honorifics(m.group("name"))
+        # then “before” form
+        for m in pat_before.finditer(txt):
+            return _strip_honorifics(m.group("name"))
+        # fallback: scan the first line that contains "district judge" and try to pick a clean name nearby
+        m = pat_line.search(txt)
+        if m:
+            line = m.group("line")
+            # try ": <name>" after the phrase
+            m2 = re.search(
+                r"(?i)\bdistrict\s+judge\b[:\s,]*"
+                r"(?:(?:the\s+)?honorable|hon\.)?\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])", line)
+            if m2: return _strip_honorifics(m2.group(1))
+            # or "<NAME>, District Judge"
+            m3 = re.search(
+                r"([A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*,\s*(?:U\.S\.\s*)?district\s+judge\b", line, flags=re.I)
+            if m3: return _strip_honorifics(m3.group(1))
+        return ""
+
+    def _extract_court(txt: str) -> str:
+        if not txt: return ""
+        m = pat_court.search(txt)
+        if m: return _norm(m.group("court"))
+        # softer fallback if phrasing differs slightly
+        m2 = re.search(r"(?im)united\s+states\s+district\s+court\s+for\s+the\s+([^\r\n,]+)", txt)
+        return _norm(m2.group(1)) if m2 else ""
+
+    # prep judge reference (canonical keys)
+    J = judges_info.copy()
+    J["jid"]       = pd.to_numeric(J["judge id"], errors="coerce").astype("Int64")
+    J["last_key"]  = J["last name"].map(_canon)
+    J["first_key"] = J["first name"].map(lambda x: _canon(re.sub(r"\.$","", (str(x).split() or [""])[0])))
+    J["court_key"] = J["court name"].map(_canon)
+
+    def _resolve_id(full_name: str, court_str: str) -> pd.Series:
+        first, last = _split_name(full_name)
+        last_key  = _canon(last)
+        first_key = _canon(first)
+        court_key = _canon(court_str)
+        if not last_key:
+            return pd.Series({"district judge": "", "district judge id": pd.NA})
+
+        cand = J[J["last_key"] == last_key]
+        if len(cand) == 1:
+            return pd.Series({"district judge": last.lower(), "district judge id": cand["jid"].iloc[0]})
+        if len(cand) > 1 and first_key:
+            cand2 = cand[cand["first_key"] == first_key]
+            if len(cand2) == 1:
+                return pd.Series({"district judge": last.lower(), "district judge id": cand2["jid"].iloc[0]})
+            if len(cand2) > 1 and court_key:
+                c3 = cand2[cand2["court_key"].apply(lambda x: bool(x) and (court_key in x or x in court_key))]
+                if len(c3):
+                    return pd.Series({"district judge": last.lower(), "district judge id": c3["jid"].iloc[0]})
+        # if still ambiguous or no match
+        return pd.Series({"district judge": last.lower(), "district judge id": pd.NA})
+
+    # apply per row (robustness > minimal lines)
+    out = cl_data.copy()
+    texts = out["opinion_text"].astype(str)
+    names = texts.map(_extract_name)
+    courts = texts.map(_extract_court)
+    resolved = [ _resolve_id(n, c) for n, c in zip(names, courts) ]
+    resolved_df = pd.DataFrame(resolved, index=out.index)
+    out["district judge"] = resolved_df["district judge"]
+    out["district judge id"] = resolved_df["district judge id"].astype("Int64")
+    return out
