@@ -379,6 +379,9 @@ def promotion_info_judges(judge_info):
     return ji_district
 
 
+
+##### everything down put in scr/jp/cl/scrape
+
 import os, io, re, time, random, requests, pandas as pd
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
