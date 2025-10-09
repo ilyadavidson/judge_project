@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 from pypdf import PdfReader
 from tempfile import NamedTemporaryFile  
 
-def _arrow_filter_table(files: list[str], courts: list[str]):
+def _arrow_filter_table(files: list[str], courts: list[str]): # saved in scr/jp/cap/
     """
     Use PyArrow Dataset to scan many Parquet files while filtering over smaller subset.
 
