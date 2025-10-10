@@ -1,7 +1,9 @@
 import json
 import tempfile
 from pathlib import Path
+from typing import Dict
 import pandas as pd
+from .text import norm_id
 
 """
 This file contains helpers for different data formats.
@@ -53,3 +55,18 @@ def append_jsonl_atomic(records: list[dict], path: str | Path):
     with open(path, "a", encoding="utf-8") as dst, open(tmp, "r", encoding="utf-8") as src:
         for line in src:
             dst.write(line)
+
+def _load_mapping(path: str) -> Dict[str, str]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        d = {}
+    # normalize keys/vals to strings
+    out = {}
+    for k, v in d.items():
+        nk, nv = norm_id(k), norm_id(v)
+        if nk and nv:
+            out[nk] = nv
+    return out
+

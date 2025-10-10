@@ -6,8 +6,7 @@ from pathlib import Path
 import argparse
 import pandas as pd
 
-# your module (you already have cl_loader(judges))
-from cl_data_maker import cl_loader
+from scr.jp.cl.extract import cl_loader
 
 DATA_DIR       = Path("data")
 ARTIFACTS_DIR  = Path("artifacts")
@@ -21,7 +20,7 @@ def main(args):
     cl = cl_loader(judges)
 
     # ensure minimal required columns exist
-    need = {'_cid','name','docket_number','decision_date','opinion_text',
+    need = {'name','docket_number','decision_date','opinion_text',
             'district judge','district judge id','is_appellate','unique_id','overlap_by_substring'}
     missing = need - set(cl.columns)
     if missing:
@@ -35,6 +34,4 @@ def main(args):
     print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    _ = parser.parse_args()
-    main(_)
+    main()

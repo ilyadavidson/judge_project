@@ -39,7 +39,7 @@ def _arrow_filter_table(files: list[str], courts: list[str]):
     return table
 
 def build_cap_dataset(
-        pattern: str | Path              = "data/parquet_files/CAP_data_*.parquet",
+        parquet_root: str | Path         = "data/parquet_files",
         appellate: list[str] | None      = ["Third Circuit"], 
         district: list[str]  | None      = ["Delaware", "New Jersey", "Pennsylvania", "Virgin Islands"]):
     """
@@ -50,7 +50,10 @@ def build_cap_dataset(
     
     # Loads in the parquet files
     ############################################################################################################
-    files = sorted(glob.glob(pattern))
+    parquet_root = Path(parquet_root)
+    pattern = parquet_root / "CAP_data_*.parquet"
+
+    files = sorted(glob.glob(str(pattern)))
     print(f"Working dir: {os.getcwd()}")
     print(f"Found {len(files)} parquet files for pattern: {pattern}")
 
@@ -74,7 +77,7 @@ def build_cap_dataset(
     df["unique_id"]         = df.index.astype(str)
     df["is_appellate"]      = np.where(df["court_name"].str.contains("Appeals", case=False, na=False), 1, 0)
 
-    # Delete duplicates based on opinion type and docket number and keeps the one with majority vote
+    # Delete applicate duplicates based on opinion type and docket number and keeps the one with majority vote
     ############################################################################################################
     appellate = (
         df[df["is_appellate"] == 1]

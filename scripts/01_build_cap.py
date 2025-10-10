@@ -1,32 +1,45 @@
 """
 Build the CAP dataset (district + appellate), do basic filtering, and save.
 """
-from pathlib import Path
+from    pathlib                 import Path
+
 import argparse
-import pandas as pd
+import pandas                   as pd
+import logging
 
-# your modules
-from cap.data_loading import build_cap_dataset, keep_majority_for_appellate
-
-# if yours live elsewhere: from data_loading import build_cap_dataset, keep_majority_for_appellate
+from scr.jp.cap.data_loading    import build_cap_dataset
+from scr.jp.cap.linking         import match_appellates
 
 DATA_DIR       = Path("data")
-ARTIFACTS_DIR  = Path("artifacts")
+ARTIFACTS_DIR  = DATA_DIR / "artifacts" / "cap"
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
-def main(args):
+def main():
+    
+    # 1. Building CAP dataset from parquet files
+    ########################################################
     print("[CAP] building dataset…")
-    df = build_cap_dataset(parquet_root=DATA_DIR / "parquet_files")
+
+    df      = build_cap_dataset(parquet_root=DATA_DIR / "parquet_files")
     print(f"[CAP] rows: {len(df):,}")
 
-    print("[CAP] keep majority opinion for appellate cases…")
-    df = keep_majority_for_appellate(df)
+    # 2. Appellate mapping to district cases and get judge
+    ########################################################
+    df      = match_appellates(df, path="data/artifacts/cap/appellate_matches2.json")
 
-    out_parquet = ARTIFACTS_DIR / "cap_clean.parquet"
+    print(f"Appellate matching done, kept {len(df)} cases.")
+
+    # 3.1. Ensure required columns are present
+    required_columns = {"district judge id", "district judge", "opinion_text", "unique_id", "name", "docket_number"}
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        raise ValueError(f"[CAP] Missing required columns: {', '.join(missing_columns)}")
+
+    # 4. Return clean CAP files.
+    ########################################################
+    out_parquet = ARTIFACTS_DIR / "cap_dataset.parquet"
     df.to_parquet(out_parquet, index=False)
     print(f"[CAP] wrote {out_parquet} ({len(df):,} rows)")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    _ = parser.parse_args()
-    main(_)
+    main()
