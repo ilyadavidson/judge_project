@@ -5,6 +5,8 @@ This file extracts all the judge info from the scraped data and return the datas
 
 import re, unicodedata
 import pandas as pd
+import os
+from scr.jp.cl.scrape import scrape_third_circuit 
 
 def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame) -> pd.DataFrame:
     """Add 'district judge' (last name, lowercase) and 'district judge id' (Int64) to cl_data.
@@ -142,10 +144,9 @@ def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame
     return out
 
 
-def cl_loader(judges):
+def cl_loader(cl_data, judges):
     thrd_judges = judges[judges['court name'].str.contains(r"Third|Delaware|New Jersey|Pennsylvania|Virgin Islands")]
-    cl_data = pd.read_csv('third_circuit_cases.csv') if os.path.exists('third_circuit_cases.csv') else pd.DataFrame(columns=["name","docket_number","decision_date","opinion_text"])
-
+ 
     PHRASE = r"(?i)(?<!\w)(?:on[\s\u00A0]+)?appeal[\s\u00A0]+from(?!\w)|(?<!\w)district[\s\u00A0]+judge(?!\w)"
     cl_clean = cl_data[cl_data["opinion_text"].str.contains(PHRASE, case=False, regex=True, na=False)].reset_index(drop=True)
     cl_extracted = extract_district_judge_info(cl_clean, judges)
@@ -155,5 +156,7 @@ def cl_loader(judges):
     cl_clean['is_appellate'] = 1
     cl_clean['unique_id'] = 'CL_' + cl_clean.index.astype(str)
     cl_clean = cl_clean[cl_clean['district judge id'].notna()]
+
+    cl_clean = cl_clean[cl_clean["opinion_text"].notna()]
 
     return cl_clean

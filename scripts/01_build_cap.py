@@ -3,10 +3,6 @@ Build the CAP dataset (district + appellate), do basic filtering, and save.
 """
 from    pathlib                 import Path
 
-import argparse
-import pandas                   as pd
-import logging
-
 from scr.jp.cap.data_loading    import build_cap_dataset
 from scr.jp.cap.linking         import match_appellates
 
@@ -30,12 +26,13 @@ def main():
     print(f"Appellate matching done, kept {len(df)} cases.")
 
     # 3.1. Ensure required columns are present
-    required_columns = {"district judge id", "district judge", "opinion_text", "unique_id", "name", "docket_number"}
-    missing_columns = required_columns - set(df.columns)
+    required_columns        = {"district judge id", "district judge", "opinion_text", "unique_id", "name", "docket_number"}
+    missing_columns         = required_columns - set(df.columns)
+
     if missing_columns:
         raise ValueError(f"[CAP] Missing required columns: {', '.join(missing_columns)}")
 
-    # 4. Return clean CAP files.
+    # 3. Return clean CAP files.
     ########################################################
     out_parquet = ARTIFACTS_DIR / "cap_dataset.parquet"
     df.to_parquet(out_parquet, index=False)

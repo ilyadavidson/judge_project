@@ -351,4 +351,6 @@ def match_appellates(df:                pd.DataFrame,
            .merge(district_lookup, on="district_uid", how="left")
     )
 
+    out = out[out['district judge id'].notna()]
+
     return out
