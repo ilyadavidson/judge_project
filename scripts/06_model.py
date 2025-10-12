@@ -12,48 +12,47 @@ ARTIFACTS_DIR = Path("artifacts")
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def main(args):
-    feats = pd.read_parquet(ARTIFACTS_DIR / "judges_features.parquet").copy()
 
-    # Target variable
-    if "is_promoted" not in feats.columns:
-        raise RuntimeError("judges_features.parquet must include 'is_promoted' (0/1)")
-    feats["is_promoted"] = pd.to_numeric(feats["is_promoted"], errors="coerce")
+# 1. Target and base numeric features
+####################################################################################
+    feature_dataset = pd.read_csv(ARTIFACTS_DIR / "features.csv")
+    y       = feature_dataset["is_promoted"].astype(float)  
+    X       = pd.DataFrame({
+        "overturnrate": pd.to_numeric(feature_dataset["overturnrate"], errors="coerce"),
+        "average_politicality": pd.to_numeric(feature_dataset["avg_politicality"], errors="coerce"),
+    })
 
-    # Predictors
-    X_cols = ["overturn_rate"]
-    # add optional controls if present
-    for c in ["n_cases","gender","ethnicity"]:
-        if c in feats.columns:
-            X_cols.append(c)
+    # 2. Categorical features (one-hot encoded)
+    ####################################################################################
+    gender_dummies = pd.get_dummies(feature_dataset["gender"], prefix="gender", drop_first=True, dtype=float)
+    X = pd.concat([X, gender_dummies], axis=1)
 
-    # Encode categoricals
-    for c in ["gender","ethnicity"]:
-        if c in feats.columns:
-            feats[c] = feats[c].astype("category")
-    X = pd.get_dummies(feats[X_cols], drop_first=True)
+    aba_num = pd.to_numeric(feature_dataset['aba rating'], errors="coerce").fillna(2)
+    aba_dummies = pd.get_dummies(
+        aba_num.astype("category"),
+        prefix="ABA",
+        drop_first=True,   # omits one category (baseline)
+        dtype=float
+    )
+    X = pd.concat([X, aba_dummies], axis=1)
 
-    # Drop rows with missing target or predictors
-    y = feats["is_promoted"]
-    mask = (~y.isna()) & (~X.isna().any(axis=1))
-    X, y = X.loc[mask], y.loc[mask]
+    X = X.apply(pd.to_numeric, errors="coerce")
+    mask = ~(y.isna() | X.isna().any(axis=1))
+    y_clean = y.loc[mask]
+    X_clean = X.loc[mask]
 
-    # Handle constant / singular matrix
-    X = sm.add_constant(X, has_constant="add")
-    # Drop zero-variance columns
-    nunique = X.nunique()
-    keep_cols = nunique[nunique > 1].index
-    X = X[keep_cols]
+    X_clean = sm.add_constant(X_clean, has_constant="add")
 
-    print(f"[Model] rows: {len(y):,} | features: {X.shape[1]}")
-    if X.shape[0] == 0 or X.shape[1] < 2:
-        raise RuntimeError("Not enough data to fit the model.")
 
-    try:
-        model = sm.Logit(y, X).fit(maxiter=200, disp=False)
-    except Exception as e:
-        # fallback to penalized to reduce singularity issues
-        model = sm.Logit(y, X).fit_regularized(alpha=1e-4, L1_wt=0.0, maxiter=500)
+    # 3. Regression models
+    ####################################################################################
+    model = sm.Logit(y_clean, X_clean).fit(maxiter=100)
+    print("=== Logistic Regression: is promoted ~ overturnrate + gender + ethnicity ===")
+    print(model.summary())
 
+    ols_model = sm.OLS(y_clean, X_clean).fit(maxiter=100)
+    print("\n=== OLS Regression: is promoted ~ overturnrate + gender + ethnicity ===")
+    print(ols_model.summary())
     # Save summary + coefs
     summary_txt = ARTIFACTS_DIR / "logit_summary.txt"
     with summary_txt.open("w") as f:

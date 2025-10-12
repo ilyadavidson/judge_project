@@ -12,8 +12,7 @@ from    pathlib     import Path
 import  argparse
 import  pandas      as pd
 
-from scr.jp.api.results import attach_api_to_cl_clean, cap_data_cleaner  # match judge names to judge ids
-from api_call       import load_case_results  # parses JSONL -> tidy DF with custom_id + 9 keys
+from src.jp.api.results import attach_api_to_cl_clean, cap_data_cleaner, load_case_results  # match judge names to judge ids
 
 DATA_DIR       = Path("data")
 ARTIFACTS_DIR  = Path("data/artifacts")
@@ -67,6 +66,7 @@ def main(args):
 
     results_jsonl           = API_OUTPUT_DIR / "api_responses.jsonl"
     answers                 = load_case_results(str(results_jsonl))
+    answers["custom_id"]    = answers["custom_id"].astype(str)
 
     if answers.empty:
         print("[API] no parsed answers found.")
@@ -78,12 +78,12 @@ def main(args):
     # 2. If CL, attach to CL data with district judge info and remove rows where info not found.
     # If CAP, attach where info is found, but otherwise use our manual district judge lookup.
     #########################################################################################
-    answers                 = answers.copy()
-    answers["custom_id"]    = answers["custom_id"].astype(str)
 
-    if answers["custom_id"].str.startswith("CL_").any():
+    if "custom_id" in answers.columns and answers["custom_id"].astype(str).str.startswith("CL_").any():
+        print("[API] Detected CourtListener (CL) results → attaching to CL dataset…")
         cl_clean = attach_api_to_cl_clean(cl)
     else:
+        print("[API] Detected CAP results → cleaning CAP dataset…")
         cap_clean = cap_data_cleaner(cap)
     
     full = merge_cap_and_cl(cap_clean, cl_clean)
@@ -91,7 +91,7 @@ def main(args):
     # 3. Return the full dataset with answers and district judge info
     ##########################################################################################
     out_csv = ARTIFACTS_DIR / "merged" / "cases_with_answers.csv"
-    cl.to_csv(full, index=False)
+    full.to_csv(out_csv, index=False)
     print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
 
 if __name__ == "__main__":

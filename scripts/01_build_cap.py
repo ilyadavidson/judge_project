@@ -2,9 +2,10 @@
 Build the CAP dataset (district + appellate), do basic filtering, and save.
 """
 from    pathlib                 import Path
+import  pandas                  as pd
 
-from scr.jp.cap.data_loading    import build_cap_dataset
-from scr.jp.cap.linking         import match_appellates
+from jp.cap.data_loading    import build_cap_dataset
+from jp.cap.linking         import match_appellates
 
 DATA_DIR       = Path("data")
 ARTIFACTS_DIR  = DATA_DIR / "artifacts" / "cap"
@@ -16,12 +17,20 @@ def main():
     ########################################################
     print("[CAP] building dataset…")
 
-    df      = build_cap_dataset(parquet_root=DATA_DIR / "parquet_files")
+    df_3d      = build_cap_dataset(parquet_root=DATA_DIR / "parquet_files",  # Third circuit
+                                   appellate = ["Third Circuit"], 
+                                   district = ["Delaware", "New Jersey", "Pennsylvania", "Virgin Islands"])
+    df_4d      = build_cap_dataset(parquet_root=DATA_DIR / "parquet_files",  # Fourth circuit
+                                   appellate = ["Fourth Circuit"], 
+                                   district = ["Maryland", "Carolina", "Virginia"])
+    
+    df = pd.concat([df_3d, df_4d], ignore_index=True)
+
     print(f"[CAP] rows: {len(df):,}")
 
     # 2. Appellate mapping to district cases and get judge
     ########################################################
-    df      = match_appellates(df, path="data/artifacts/cap/appellate_matches2.json")
+    df      = match_appellates(df, path="data/artifacts/cap/appellate_matches.json", re_match=True)
 
     print(f"Appellate matching done, kept {len(df)} cases.")
 

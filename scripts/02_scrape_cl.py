@@ -7,7 +7,7 @@ import argparse
 import pandas as pd
 import os
 
-from scr.jp.cl.extract import cl_loader, scrape_third_circuit
+from src.jp.cl.extract import cl_loader, scrape_third_circuit
 
 DATA_DIR       = Path("data")
 ARTIFACTS_DIR  = DATA_DIR / Path("artifacts")
@@ -20,10 +20,10 @@ def main():
     CSV_PATH        = "data/artifacts/cl/third_circuit_cases.csv"
 
     if os.path.exists(CSV_PATH):
-        print(f"[CL] Loading existing {CSV_PATH}...") # load
+        print(f"[CL] Loading existing {CSV_PATH}...")                           # load
         cl_data = pd.read_csv(CSV_PATH)
     else:
-        print(f"[CL] {CSV_PATH} not found — scraping Third Circuit cases...") # or scrape
+        print(f"[CL] {CSV_PATH} not found — scraping Third Circuit cases...")   # or scrape
         cl_data = scrape_third_circuit(limit=None, out_csv=CSV_PATH)
 
     cl          = cl_loader(cl_data, judges)

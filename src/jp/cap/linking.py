@@ -6,18 +6,12 @@ import numpy    as np
 import pandas   as pd
 import json
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing           import normalize
-from typing                         import Callable
+from sklearn.feature_extraction.text    import TfidfVectorizer
+from sklearn.preprocessing              import normalize
+from typing                             import Callable
 
-import importlib
-import helper_functions
-importlib.reload(helper_functions)
-from helper_functions                import split_on_v, _find_docket_in_text, _norm_docket, _candidate_judge_names, _text_contains_any, normalize_case_name, norm_id
-from helper_functions                import split_normalize_dockets, extract_all_dockets
-from data_loading                    import build_cap_dataset
-from api_call                        import _extract_text
-from scr.jp.utils.io                 import _load_mapping
+from jp.utils.io                    import _load_mapping
+from jp.utils.text                  import normalize_case_name, split_on_v, split_normalize_dockets, extract_all_dockets, _text_contains_any, _candidate_judge_names
 
 
 # Mapping appellate judges to district judges
@@ -85,15 +79,15 @@ def build_district_tfidf_index(     df:         pd.DataFrame = None,
     X_right = normalize(vec.transform(right_norm), norm="l2", copy=False)
 
     return {
-        "vectorizer": vec,
-        "X_left": X_left,
-        "X_right": X_right,
-        "dct_index": dcts.index.to_numpy(),
-        "dct_dates": pd.to_datetime(dcts["decision_date"], errors="coerce").to_numpy(),
-        "left_norm": left_norm.reset_index(drop=True),
-        "right_norm": right_norm.reset_index(drop=True),
-        "left_raw": left_raw.reset_index(drop=True),
-        "right_raw": right_raw.reset_index(drop=True),
+        "vectorizer":       vec,
+        "X_left":           X_left,
+        "X_right":          X_right,
+        "dct_index":        dcts.index.to_numpy(),
+        "dct_dates":        pd.to_datetime(dcts["decision_date"], errors="coerce").to_numpy(),
+        "left_norm":        left_norm.reset_index(drop=True),
+        "right_norm":       right_norm.reset_index(drop=True),
+        "left_raw":         left_raw.reset_index(drop=True),
+        "right_raw":        right_raw.reset_index(drop=True),
     }
 
 def appellate_mapping(df, side_index, nrm, score_cutoff, side_threshold, whole_index):
@@ -264,7 +258,7 @@ def run_appellate_linking(df,
                           side_threshold    = 0.7, 
                           score_low         = 0.5, 
                           score_high        = 0.8, 
-                          out_json_path     = "appellate_matches2.json"):
+                          out_json_path     = "appellate_matches.json"):
     """
     Orchestrates the full pipeline of appellate mapping.
     Returns (best_matches_df, confirmed_df).
@@ -325,20 +319,35 @@ def run_appellate_linking(df,
 
 
 def match_appellates(df:                pd.DataFrame, 
-                    path:               str = "data/artifacts/cap/appellate_matches2.json",
+                    path:               str = "data/artifacts/cap/appellate_matches.json",
                     id_col:             str = "unique_id",
                     judge_name_col:     str = "opinion_author_clean",
                     judge_id_col:       str = "opinion_author_id",
+                    re_match:           bool = True,    # whether to re-run matching even if file exists
                      ):
-    app_to_dct             = _load_mapping(path)
+
+    # 1. If matching has not been done or if we want to debug and don't need to re-calculate, 
+    # re-match = True. If not and file exists, just load the mapping (re_match = False). 
+    #####################################################################################
+
+    if re_match == True:
+        whole_index = build_district_tfidf_index(df, nrm=normalize_case_name, side=False)
+        side_index  = build_district_tfidf_index(df, nrm=normalize_case_name, side=True)
+
+        run_appellate_linking(df, whole_index, side_index)
+
+        app_to_dct  = _load_mapping(path)
+    else:
+        app_to_dct = _load_mapping(path)
+
     map_df                 = pd.DataFrame(list(app_to_dct.items()), columns=["applt_uid", "district_uid"]).astype(str)
 
-    # Keep only the original appellate cases present in mapping (keep their appellate metadata)
+    # 2. Extend the dataset by matching it with the appropriate district judge.
+    #####################################################################################
     out                    = df.copy()
     out[id_col]            = out[id_col].astype(str)
     out                    = out[out[id_col].isin(map_df["applt_uid"])].copy()
 
-    # Attach appropriate district judge
     district_lookup = (
         df[[id_col, judge_name_col, judge_id_col]]
         .drop_duplicates(subset=[id_col])
@@ -349,7 +358,7 @@ def match_appellates(df:                pd.DataFrame,
     out = (
         out.merge(map_df, left_on=id_col, right_on="applt_uid", how="left")
            .merge(district_lookup, on="district_uid", how="left")
-    )
+    )  
 
     out = out[out['district judge id'].notna()]
 

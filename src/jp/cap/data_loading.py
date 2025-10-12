@@ -8,20 +8,9 @@ import pandas as pd
 
 import pyarrow.dataset as ds
 import pyarrow.compute as pc
-import tiktoken
-import re
+
 from pathlib import Path
-import unicodedata
-import pandas as pd
-from typing import Optional
-import json
-from helper_functions import norm_id
-from typing import Dict, List, Optional
-import os, io, re, time, random, requests, pandas as pd
-from dotenv import load_dotenv
-from bs4 import BeautifulSoup
-from pypdf import PdfReader
-from tempfile import NamedTemporaryFile  
+
 
 def _arrow_filter_table(files: list[str], courts: list[str]):
     """
@@ -70,6 +59,7 @@ def build_cap_dataset(
     if table.num_rows == 0:
         return pd.DataFrame()
 
+    cols = ["name", "docket_number", "decision_date", "court_name", "opinion_author_clean", "opinion_author_id", "opinion_text"]
     df = table.to_pandas(use_threads=True)
 
     # Creates an unique id and appellate identifier
