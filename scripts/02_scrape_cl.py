@@ -10,7 +10,7 @@ import os
 from scr.jp.cl.extract import cl_loader, scrape_third_circuit
 
 DATA_DIR       = Path("data")
-ARTIFACTS_DIR  = Path("artifacts")
+ARTIFACTS_DIR  = DATA_DIR / Path("artifacts")
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def main():
@@ -37,7 +37,7 @@ def main():
 
     # 2. Return clean CL files.
     ########################################################
-    out_csv = ARTIFACTS_DIR / "cl_data_clean.csv"
+    out_csv = ARTIFACTS_DIR / "cl" / "cl_data_clean.csv"
     cl.to_csv(out_csv, index=False)
     print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
 
