@@ -1,17 +1,18 @@
 """
 This file extracts all the judge info from the scraped data and return the dataset ready to be used.
+
+TO-DO: filter for judge being in the appropriate court.
 """
-
-
 import re, unicodedata
-import pandas as pd
-import os
-from scr.jp.cl.scrape import scrape_third_circuit 
+import pandas       as pd
+
+from jp.cl.scrape   import scrape_third_circuit 
 
 def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame) -> pd.DataFrame:
     """Add 'district judge' (last name, lowercase) and 'district judge id' (Int64) to cl_data.
        Priority: parse judge near the 'Appeal from ...' block; else use generic District Judge patterns.
     """
+
     # ---------- helpers ----------
     def _norm(s): return unicodedata.normalize("NFKD", str(s or "")).replace("\u00A0"," ").strip()
     def _canon(s): return re.sub(r"[^a-z]", "", _norm(s).lower())
@@ -41,7 +42,7 @@ def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame
     pat_inline = re.compile(r"(?im)\bdistrict\s+judge\b[:\s,]*?(?:(?:the\s+)?honorable|hon\.)?\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])")
 
     # Judges reference with canonical keys
-    J = judges_info.copy()
+    J              = judges_info.copy()
     J["jid"]       = pd.to_numeric(J["judge id"], errors="coerce").astype("Int64")
     J["last_key"]  = J["last name"].map(_canon)
     J["first_key"] = J["first name"].map(lambda x: _canon(re.sub(r"\.$","", (str(x).split() or [""])[0])))
@@ -141,22 +142,22 @@ def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame
     rdf = pd.DataFrame(resolved, columns=["district judge","district judge id"], index=out.index)
     out["district judge"]    = rdf["district judge"]
     out["district judge id"] = rdf["district judge id"].astype("Int64")
+
+    out                      = out[out['district judge id'].notna()]
     return out
 
 
 def cl_loader(cl_data, judges):
-    thrd_judges = judges[judges['court name'].str.contains(r"Third|Delaware|New Jersey|Pennsylvania|Virgin Islands")]
+    """
+    Given raw CL data and judges info, return cleaned CL data with district judge info based on if the terms "Appeal from" or "District Judge" are found in the opinion text.
+    """
  
     PHRASE = r"(?i)(?<!\w)(?:on[\s\u00A0]+)?appeal[\s\u00A0]+from(?!\w)|(?<!\w)district[\s\u00A0]+judge(?!\w)"
-    cl_clean = cl_data[cl_data["opinion_text"].str.contains(PHRASE, case=False, regex=True, na=False)].reset_index(drop=True)
-    cl_extracted = extract_district_judge_info(cl_clean, judges)
 
-    cl_clean = cl_extracted[cl_extracted['district judge id'].notna()]
-    cl_clean = cl_extracted[cl_extracted["district judge id"].isin(thrd_judges["judge id"].dropna().astype(int))]
-    cl_clean['is_appellate'] = 1
-    cl_clean['unique_id'] = 'CL_' + cl_clean.index.astype(str)
-    cl_clean = cl_clean[cl_clean['district judge id'].notna()]
+    cl_regex_hits               = cl_data[cl_data["opinion_text"].str.contains(PHRASE, case=False, regex=True, na=False)].reset_index(drop=True)
+    cl_clean                    = extract_district_judge_info(cl_regex_hits, judges)
 
-    cl_clean = cl_clean[cl_clean["opinion_text"].notna()]
+    cl_clean['is_appellate']    = 1 # all are appellate cases, but keep for consistency with CAP data
+    cl_clean['unique_id']       = 'CL_' + cl_clean.index.astype(str)
 
     return cl_clean

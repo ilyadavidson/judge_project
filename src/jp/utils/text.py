@@ -199,3 +199,18 @@ def norm_id(x):
         except Exception:
             return s
     return s
+
+def _canon(s: str) -> str:
+    return re.sub(r"[^a-z]", "", str(s or "").lower())
+
+def _infer_circuit(app_court_name: str) -> str | None:
+    """
+    Return a normalized circuit key (e.g., 'first','second','third','fourth',...,'dc','federal')
+    from an appellate 'court name' string. Returns None if not identified.
+    """
+    s = _canon(app_court_name)
+    # common signals
+    for key in ["first","second","third","fourth","fifth","sixth","seventh","eighth","ninth","tenth","eleventh"]:
+        if key in s and ("circuit" in s or "ctappeals" in s or "courtofappeals" in s):
+            return key
+    return None

@@ -1,5 +1,11 @@
 """
-Mapping appellate court cases to their respective lower court cases.
+This file maps appellate court cases to their respective lower court cases. 
+Mapping is done in the following way:
+1. Case names are normalized and are either split on 'v.'/'vs.' (side-aware) or not (whole-caption). (e.g. "USA vs. James" and "In re USA James"). 
+By splitting on 'v.' we can ensure that both sides match, so "USA vs. James" does not match "Jones vs. James". Therefore a seperate TFIDF index is built for side-aware matching.
+2. A TF-IDF index is built over all district cases (either side-aware or whole-caption).
+3. Each appellate case is then matched, if its succeeds a certain threshold its a confirmed match. For ambigous matches (midrange scores), additional confirmation is done using docket numbers and judge names.
+4. The mapping is saved as a JSON file (appellate_unique_id -> district_unique_id).
 """
 
 import numpy    as np
@@ -11,8 +17,8 @@ from sklearn.preprocessing              import normalize
 from typing                             import Callable
 
 from jp.utils.io                    import _load_mapping
-from jp.utils.text                  import normalize_case_name, split_on_v, split_normalize_dockets, extract_all_dockets, _text_contains_any, _candidate_judge_names
-
+from jp.utils.text                  import normalize_case_name, split_on_v, split_normalize_dockets, extract_all_dockets, _text_contains_any, _candidate_judge_names, _infer_circuit
+from jp.utils.constants             import circuit_to_districts
 
 # Mapping appellate judges to district judges
 ###################################################################################
@@ -150,8 +156,8 @@ def appellate_mapping(df, side_index, nrm, score_cutoff, side_threshold, whole_i
             if best <= score_cutoff:
                 continue
             out.append({
-                "appellate_index":      ai,
-                "district_index":       int(whole_index["dct_index"][r]),
+                "appellate_index":      df.at[ai, "unique_id"],
+                "district_index":       df.at[int(whole_index["dct_index"][r]), "unique_id"],
                 "score":                best + 0.15, # Since there's no v we add a small bonus to the score as it's more difficult to be similar
                 "appellate_name":       q,
                 "district_name":        whole_index["dct_names"].iloc[r],
@@ -194,9 +200,11 @@ def appellate_mapping(df, side_index, nrm, score_cutoff, side_threshold, whole_i
         if best <= score_cutoff:
             continue
 
+        # Could add a check if the courts match up.
+
         out.append({
-            "appellate_index":  ai,
-            "district_index":   int(dct_idx[r]),
+            "appellate_index":  df.at[ai, "unique_id"],
+            "district_index":   df.at[int(dct_idx[r]), "unique_id"],
             "score":            best,
             "appellate_name":   f"{L_norm} | {R_norm}",
             "district_name":    f"{side_index['left_norm'].iloc[r]} | {side_index['right_norm'].iloc[r]}",
@@ -206,41 +214,35 @@ def appellate_mapping(df, side_index, nrm, score_cutoff, side_threshold, whole_i
 
     return pd.DataFrame(out, columns=["appellate_index","district_index","score","appellate_name_raw","district_name_raw"])
 
-def confirm_midrange_matches(matches, df_all, score_low=0.50, score_high=0.80):
+def confirm_midrange_matches(matches, df_all):
     """
     Calculates additional confirmation for midrange matches using docket numbers and judge names.
 
     :param best_matches: DataFrame output from appellate_mapping()
     :param df_all: DataFrame with all cases, must include 'opinion_text', 'docket_number', 'opinion_author_raw'
-    :param score_low: lower bound of midrange scores to check
-    :param score_high: upper bound of midrange scores to check
     """
 
     out = matches.copy()
     out["text_confirmed"] = False
     out["confirm_reason"] = pd.NA
 
-    # focus on midrange scores
-    mid = out[(out["score"] >= score_low) & (out["score"] <= score_high)]
+    for i, row in out.iterrows():
+        ai = int(row["appellate_index"])
+        di = int(row["district_index"])
 
-    for i, row in mid.iterrows():
-        ai = row["appellate_index"]
-        di = row["district_index"]
-
-        # pull texts and fields
         app_text = df_all.at[ai, "opinion_text"] if ai in df_all.index else ""
         d_docket = df_all.at[di, "docket_number"] if di in df_all.index else ""
-        d_judge  = df_all.at[di, "opinion_author_raw"]  if di in df_all.index else ""
+        d_judge  = df_all.at[di, "opinion_author_raw"] if di in df_all.index else ""
 
         # 1) Docket check
-        app_snip_dockets = extract_all_dockets(app_text)  # from appellate opinion text
+        app_snip_dockets = extract_all_dockets(app_text)
         if app_snip_dockets:
             app_set = set(app_snip_dockets)
             dct_set = set(split_normalize_dockets(str(d_docket)))
-            if app_set & dct_set:  # intersection non-empty
+            if app_set & dct_set:
                 out.at[i, "text_confirmed"] = True
                 out.at[i, "confirm_reason"] = "docket"
-                continue # done with this row
+                continue
 
         # 2) Judge-name fallback
         judge_needles = _candidate_judge_names(d_judge)
@@ -248,26 +250,30 @@ def confirm_midrange_matches(matches, df_all, score_low=0.50, score_high=0.80):
             out.at[i, "text_confirmed"] = True
             out.at[i, "confirm_reason"] = "judge"
     
+    # Could add a check if the courts match up.
+
     return out
 
 def run_appellate_linking(df, 
                           whole_index, 
                           side_index , 
                           nrm               = normalize_case_name, 
-                          score_cutoff      = 0.0, 
                           side_threshold    = 0.7, 
-                          score_low         = 0.5, 
+                          score_cutoff      = 0.65, 
                           score_high        = 0.8, 
-                          out_json_path     = "appellate_matches.json"):
+                          out_json_path     = "data/artifacts/cap/appellate_matches.json"):
     """
-    Orchestrates the full pipeline of appellate mapping.
+    Orchestrates the full pipeline of appellate mapping. Matching is done in two stages:
+    1. Matching is done either based on the full name or on the sides (if 'v' present). If the score is above score_high, the match is accepted. 
+    For cases without 'v', a small bonus is added to the score as it's more difficult to be similar. For cases with 'v', both sides need to be above side_threshold to be considered a match.
+    This way 'USA v. Smith' does not match 'Jones v. Smith', and due to the bonus 'USA against J. Smith' can match 'USA against John Smith'. 
+    2. If the score is between score_low and score_high, additional confirmation is done using docket numbers and judge names. If either matches, the match is accepted.
     Returns (best_matches_df, confirmed_df).
 
     :param df: DataFrame with all cases
     :param nrm: function to normalize case names
-    :param score_cutoff: minimum similarity score to report a match
-    :param side_threshold: minimum side similarity (0-1) to consider both sides matching
-    :param score_low: lower bound of midrange scores to check
+    :param side_threshold: minimum side similarity (0-1) to consider both sides matching, if both sides have this score or higher then the match is valid.
+    :param score_low: minimum similarity score to report a match. If you want to debug to see all matches, set to 0, but for calculations 0.5 is only needed. Also the lower bound of midrange scores to check
     :param score_high: upper bound of midrange scores to check
     :param out_json_path: path to write JSON output with both tables
     """
@@ -289,15 +295,13 @@ def run_appellate_linking(df,
 
     # partition by score
     high    = best_matches[best_matches['score']>= score_high].copy()
-    mid     = best_matches[(best_matches["score"] >= score_low) & (best_matches["score"] < score_high)].copy()
+    mid     = best_matches[(best_matches["score"] >= score_cutoff) & (best_matches["score"] < score_high)].copy()
 
     # Midrange confirmations
     ############################################################################################################
     confirmed = confirm_midrange_matches(
         matches         = mid,
         df_all          = df,
-        score_low       = score_low,
-        score_high      = score_high,
     )
 
     confirmed_only = confirmed[confirmed["text_confirmed"] == True]
@@ -307,10 +311,10 @@ def run_appellate_linking(df,
     combined_dict = {}
 
     for rec in high.to_dict(orient="records"):
-        combined_dict[str(df.at[rec["appellate_index"], "unique_id"])] = str(df.at[rec["district_index"], "unique_id"])
+        combined_dict[str(rec["appellate_index"])] = str(rec["district_index"])
 
     for rec in confirmed_only.to_dict(orient="records"):
-        combined_dict[str(df.at[rec["appellate_index"], "unique_id"])] = str(df.at[rec["district_index"], "unique_id"])
+        combined_dict[str(rec["appellate_index"])] = str(rec["district_index"])
 
     with open(out_json_path, "w", encoding="utf-8") as f:
         json.dump(combined_dict, f, ensure_ascii=False, indent=2)
@@ -334,7 +338,7 @@ def match_appellates(df:                pd.DataFrame,
         whole_index = build_district_tfidf_index(df, nrm=normalize_case_name, side=False)
         side_index  = build_district_tfidf_index(df, nrm=normalize_case_name, side=True)
 
-        run_appellate_linking(df, whole_index, side_index)
+        run_appellate_linking(df, whole_index, side_index, out_json_path=path)
 
         app_to_dct  = _load_mapping(path)
     else:

@@ -6,7 +6,7 @@ from pathlib import Path
 import argparse
 import pandas as pd
 
-from src.jp.api.submit import run_incremental_batches
+from jp.api.submit import run_incremental_batches
 
 DATA_DIR       = Path("data")
 ARTIFACTS_DIR  = Path("artifacts")

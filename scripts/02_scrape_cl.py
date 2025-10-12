@@ -2,12 +2,11 @@
 Scrape / load CourtListener Third Circuit cases, extract district judges,
 and save a clean CL dataset.
 """
-from pathlib import Path
-import argparse
-import pandas as pd
 import os
+import pandas           as pd
 
-from src.jp.cl.extract import cl_loader, scrape_third_circuit
+from pathlib            import Path
+from jp.cl.extract      import cl_loader, scrape_third_circuit
 
 DATA_DIR       = Path("data")
 ARTIFACTS_DIR  = DATA_DIR / Path("artifacts")
@@ -26,7 +25,7 @@ def main():
         print(f"[CL] {CSV_PATH} not found — scraping Third Circuit cases...")   # or scrape
         cl_data = scrape_third_circuit(limit=None, out_csv=CSV_PATH)
 
-    cl          = cl_loader(cl_data, judges)
+    cl          = cl_loader(cl_data, judges)                                    # extract judges info 
 
     # 2.1. Ensure required columns are present
     required_columns        = {"district judge id", "district judge", "opinion_text", "unique_id", "name", "docket_number"}
