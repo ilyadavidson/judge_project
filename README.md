@@ -14,6 +14,7 @@ All scripts and helper functions are contained in the `src/jp/` directory.
 
 ## Project Structure
 
+````text
 project_root/
 │
 ├── data/
