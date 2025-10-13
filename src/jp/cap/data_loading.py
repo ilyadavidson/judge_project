@@ -59,7 +59,6 @@ def build_cap_dataset(
     if table.num_rows == 0:
         return pd.DataFrame()
 
-    cols = ["name", "docket_number", "decision_date", "court_name", "opinion_author_clean", "opinion_author_id", "opinion_text"]
     df = table.to_pandas(use_threads=True)
 
     # Creates an unique id and appellate identifier

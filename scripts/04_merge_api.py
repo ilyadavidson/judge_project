@@ -67,24 +67,30 @@ def main(args):
     results_jsonl           = API_OUTPUT_DIR / "api_responses.jsonl"
     answers                 = load_case_results(str(results_jsonl))
     answers["custom_id"]    = answers["custom_id"].astype(str)
+        
+    has_cl                  = answers["custom_id"].str.startswith("CL_").any()
+    has_cap                 = answers["custom_id"].str.startswith("CAP_").any()
 
     if answers.empty:
         print("[API] no parsed answers found.")
         return
     
     cl                      = ARTIFACTS_DIR / "cl" / "cl_data_clean.csv"
-    cap                     = ARTIFACTS_DIR / "cap_dataset.parquet"
+    cap                     = ARTIFACTS_DIR / "cap" / "cap_dataset.parquet"
 
     # 2. If CL, attach to CL data with district judge info and remove rows where info not found.
     # If CAP, attach where info is found, but otherwise use our manual district judge lookup.
     #########################################################################################
 
-    if "custom_id" in answers.columns and answers["custom_id"].astype(str).str.startswith("CL_").any():
+    if has_cl:
         print("[API] Detected CourtListener (CL) results → attaching to CL dataset…")
         cl_clean = attach_api_to_cl_clean(cl)
-    else:
+    if has_cap:
         print("[API] Detected CAP results → cleaning CAP dataset…")
         cap_clean = cap_data_cleaner(cap)
+    else:
+        print("[API] No rows after cleaning/attachment. Exiting.")
+        return
     
     full = merge_cap_and_cl(cap_clean, cl_clean)
 

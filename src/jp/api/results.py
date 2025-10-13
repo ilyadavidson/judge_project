@@ -49,7 +49,7 @@ def get_id_from_names(out: pd.DataFrame, judges: pd.DataFrame) -> pd.Series:
 
 def attach_api_to_cl_clean(
     cl_clean:           pd.DataFrame,
-    api_path:           str = "data/artifacts/api/outputs/cl_api_answers.jsonl",
+    api_path:           str = "data/artifacts/api/outputs/api_answers.jsonl",
     judges:             str = "data/judge_info.csv",
     *,
     id_col:             str = "unique_id",

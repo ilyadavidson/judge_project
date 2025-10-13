@@ -1,6 +1,7 @@
 import re
 import pandas as pd
 import tiktoken
+from pathlib                 import Path
 
 def normalize_case_name(name: str) -> str:
     """
@@ -248,3 +249,8 @@ def text_builder(df, limit, mx_tk):
         results.append({"id": cid, "text": trimmed})
 
     return results
+
+def ensure_dir(*parts) -> Path:
+    path = Path(*parts)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
