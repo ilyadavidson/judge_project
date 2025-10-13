@@ -3,17 +3,16 @@ Aggregate per-judge features from case-level data (incl. API outputs).
 Outputs:
   - artifacts/judges_features.parquet
 """
-from pathlib import Path
-import argparse
-import numpy as np
-import pandas as pd
-from src.jp.features.engineer   import compute_overturns
-from src.jp.features.labels     import promotion_info_judges
+import pandas               as pd
+from pathlib                import Path
+
+from jp.features.engineer   import compute_overturns
+from jp.features.labels     import promotion_info_judges
 
 ARTIFACTS_DIR = Path("data/artifacts")
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
-def main(args):
+def main():
 
     # 1. Making of feature dataset
     #####################################################################################
@@ -34,5 +33,4 @@ def main(args):
     print(f"[Features] wrote {out} ({len(judges):,} judges)")
 
 if __name__ == "__main__":
-    _ = argparse.ArgumentParser().parse_args()
-    main(_)
+    main()
