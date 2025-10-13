@@ -210,6 +210,7 @@ __marimo__/
 data/
 results/
 batch_runs/
+perhaps delete/
 
 # Ignore all CSV and parquet files
 *.csv

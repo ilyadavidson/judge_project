@@ -12,6 +12,10 @@ from pathlib        import Path
 
 from dotenv         import load_dotenv
 from openai         import OpenAI
+from typing         import List
+import time
+
+from jp.utils.text   import text_builder
 load_dotenv()
 
 system_msg          = (
@@ -89,50 +93,145 @@ class BatchRequest:
             "url": self.url,
             "body": self.body,
         }
+
+def _extract_text(resp: dict):
+    if not isinstance(resp, dict):
+        return None
+    body = resp.get("body")
+    if isinstance(body, dict):
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices:
+            return choices[0]["message"]["content"]
+    # responses API shapes (fallbacks)
+    if isinstance(resp.get("output_text"), str):
+        return resp["output_text"]
+    out = resp.get("output")
+    if isinstance(out, list):
+        parts = []
+        for msg in out:
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for part in content:
+                    t = part.get("text")
+                    if t: parts.append(t)
+        return "".join(parts) if parts else None
+    return None
+
+def build_input(df, 
+                inp_path: str = 'data/artifacts/api/requests/api_requests.jsonl',
+                mx_tk:    int = 3000): 
+    """Writes the full input jsonl file for the API from the cases dataframe. Only takes the mx_tk from the opinion text to limit input and computing costs.
     
-def build_input(case_name: str, 
-                inp_path: str = 'data/artifacts/api/requests.jsonl' ):
-    """Writes the full input jsonl file for the API from the cases dataframe.
-    
-    :param books:           Str of books to ask the API
-    :param out_path:        Path to write the output jsonl file. 
+    :param df:         DataFrame containing the cases to process.
+    :param out_path:   Path to write the output jsonl file. 
+    :param mx_tk:      Maximum tokens for each case text.
     """
-    inp_path = Path(inp_path)
+
+    cases  = text_builder(df, limit=None, mx_tk=mx_tk) # should be +- 50.000 for Third Circuit
     inp_path.parent.mkdir(parents=True, exist_ok=True)
-
+    n = 0
     with inp_path.open("w", encoding="utf-8") as f:
-        for name in case_name:
-            request = BatchRequest(name).to_dict()
-            json.dump(request, f, ensure_ascii=False)
+        for row in cases:
+            cid     = str(row["id"])
+            body    = row["text"]
+            br      = BatchRequest(custom_id=cid, body=body)
+            json.dump(br.to_dict(), f, ensure_ascii=False)
             f.write("\n")
+            n += 1
+    print(f"[Build] Wrote {n} requests -> {inp_path}")
+    return n   
 
-book_names = [
-    "Harry Potter and the Philosopher's Stone",
-    "A Court of Mist and Fury"
-]
-
-def request_api(input: str = 'data/artifacts/outputs/api_answers.jsonl'):
+def split_by_size(src:         Path, 
+                  output_path: Path, 
+                  prefix:      str = "input_chunk", 
+                  max_bytes=   200*1024*1024) -> List[Path]:
+    """Now that we have the correct input for the API (input_file), we need to split it up in parts no larger than 200MB.
+    This returns , in the input_dir, which we will upload to OpenAI (batch_runs/input).
     """
-    Requests the OpenAI API for a batch job. Every time you call this function, it will ask the API thus cost money. Run ONCE. 
-    """
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    # Upload the JSONL file
-    file = client.files.create(
-        file=open(input, "rb"),
-        purpose="batch"
-    )
+    output_path.mkdir(parents=True, exist_ok=True)
+    parts:                      List[Path] = []
+    part_idx, bytes_in_part     = 1, 0
+    part_path                   = output_path / f"{prefix}_{part_idx}.jsonl"
+    out_f                       = part_path.open("wb")
+    
+    with src.open("rb") as inp:
+        for line in inp:
+            ln = len(line)
+            if bytes_in_part > 0 and bytes_in_part + ln > max_bytes:
+                out_f.close()
+                parts.append(part_path)
+                part_idx += 1
+                bytes_in_part = 0
+                part_path = output_path / f"{prefix}_{part_idx}.jsonl"
+                out_f = part_path.open("wb")
+            out_f.write(line)
+            bytes_in_part += ln
+    out_f.close()
+    parts.append(part_path)
+    print(f"[Split] Created {len(parts)} part(s) in {output_path}")
+    return parts
 
-    # Create the batch job
-    batch = client.batches.create(
-        input_file_id=file.id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h",
-    )
+def enqueue_chunks(parts: List[Path], endpoint: str, completion_window: str) -> List[str]:
+    """Upload chunk files and create batches."""
+    load_dotenv()
+    client      = OpenAI()
+    batch_ids:  List[str] = []
+    for p in parts:
+        with p.open("rb") as fh:
+            file_obj = client.files.create(file=fh, purpose="batch")
+        batch = client.batches.create(
+            input_file_id       = file_obj.id,
+            endpoint            = endpoint,
+            completion_window   = completion_window,
+            metadata={"description": f"Batch for {p.name}"},
+        )
+        batch_ids.append(batch.id)
+        print(f"[Batch] Created {batch.id} for {p.name}")
+    return batch_ids
 
-    print("Batch ID:", batch.id)
+def download_new_outputs(batch_ids: List[str], output_path: Path, poll: bool, poll_interval: int = 20) -> List[Path]:
+    """Optionally poll batches to completion and download outputs/errors."""
+    load_dotenv()
+    client = OpenAI()
+    output_path.mkdir(parents=True, exist_ok=True)
+    errors_path = "data/artifacts/api/errors"
+    errors_path.mkdir(parents=True, exist_ok=True)
+    terminal = {"completed", "failed", "cancelled", "expired"}
+    new_outputs: List[Path] = []
 
-    return batch.id
+    for bid in batch_ids:
+        if poll:
+            while True:
+                b = client.batches.retrieve(bid)
+                st = getattr(b, "status", None)
+                print(f"[Poll] {bid} status={st}")
+                if st in terminal:
+                    break
+                time.sleep(poll_interval)
+        else:
+            b = client.batches.retrieve(bid)
+
+        out_id = getattr(b, "output_file_id", None)
+        if out_id:
+            out_path = output_path / f"{bid}_results.jsonl"
+            if not out_path.exists():
+                stream = client.files.content(out_id)
+                with out_path.open("wb") as f:
+                    f.write(stream.read())
+                print(f"[Download] {bid} -> {out_path}")
+                new_outputs.append(out_path)
+
+        err_id = getattr(b, "error_file_id", None)
+        if err_id:
+            err_path = errors_path / f"{bid}_errors.jsonl"
+            if not err_path.exists():
+                estream = client.files.content(err_id)
+                with err_path.open("wb") as f:
+                    f.write(estream.read())
+                print(f"[Errors]   {bid} -> {err_path}")
+
+    return 
 
 def check_batch_status(batch_id):
     """
@@ -142,28 +241,25 @@ def check_batch_status(batch_id):
     batch = client.batches.retrieve(batch_id)
     return batch.status
 
-def download_batch_output_file(output, path: str = "output_api_books.jsonl") -> str:
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    stream = client.files.content(output)
-    with open(path, "wb") as f:
-        f.write(stream.read())
-    return path
+# def download_batch_output_file(output, path: str = "output_api_books.jsonl") -> str:
+#     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+#     stream = client.files.content(output)
+#     with open(path, "wb") as f:
+#         f.write(stream.read())
+#     return path
 
-def parse_batch_output(path: str = "output_api_books.jsonl"):
-    results = {}
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            row = json.loads(line)
-            custom_id = row.get("custom_id")
-            content = (row.get("response", {})
-                         .get("body", {})
-                         .get("choices", [{}])[0]
-                         .get("message", {})
-                         .get("content", ""))  # model's JSON as a string
-            if not custom_id or not content:
-                continue
-            results[custom_id] = json.loads(content)  # dict with 4 keys
-    return results
-
-path = download_batch_output_file(b.output_file_id)
-data_by_book = parse_batch_output(path)
+# def parse_batch_output(path: str = "output_api_books.jsonl"):
+#     results = {}
+#     with open(path, "r", encoding="utf-8") as f:
+#         for line in f:
+#             row = json.loads(line)
+#             custom_id = row.get("custom_id")
+#             content = (row.get("response", {})
+#                          .get("body", {})
+#                          .get("choices", [{}])[0]
+#                          .get("message", {})
+#                          .get("content", ""))  # model's JSON as a string
+#             if not custom_id or not content:
+#                 continue
+#             results[custom_id] = json.loads(content)  # dict with 4 keys
+#     return results

@@ -16,9 +16,8 @@ from sklearn.feature_extraction.text    import TfidfVectorizer
 from sklearn.preprocessing              import normalize
 from typing                             import Callable
 
-from jp.utils.io                    import _load_mapping
-from jp.utils.text                  import normalize_case_name, split_on_v, split_normalize_dockets, extract_all_dockets, _text_contains_any, _candidate_judge_names, _infer_circuit
-from jp.utils.constants             import circuit_to_districts
+from jp.utils.io                        import _load_mapping
+from jp.utils.text                      import normalize_case_name, split_on_v, split_normalize_dockets, extract_all_dockets, _text_contains_any, _candidate_judge_names, _infer_circuit
 
 # Mapping appellate judges to district judges
 ###################################################################################
@@ -273,9 +272,11 @@ def run_appellate_linking(df,
     :param df: DataFrame with all cases
     :param nrm: function to normalize case names
     :param side_threshold: minimum side similarity (0-1) to consider both sides matching, if both sides have this score or higher then the match is valid.
-    :param score_low: minimum similarity score to report a match. If you want to debug to see all matches, set to 0, but for calculations 0.5 is only needed. Also the lower bound of midrange scores to check
+    :param score_low: minimum similarity score to report a match. If you want to debug to see all matches, set to 0. Also the lower bound of midrange scores to check
     :param score_high: upper bound of midrange scores to check
     :param out_json_path: path to write JSON output with both tables
+
+    :return: a dataframe of all appellate cases with the appropriate district judge and judge id matched.
     """
     df = df.copy()
 

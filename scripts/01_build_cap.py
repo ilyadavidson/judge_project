@@ -24,7 +24,7 @@ def main():
                                    appellate = ["Fourth Circuit"], 
                                    district = ["Maryland", "Carolina", "Virginia"])
 
-    print(f"[CAP] rows: {len(df_3d) + len(df_4d):,}")
+    print(f"[CAP] rows: {len(df_3d) + len(df_4d):,}") # in two go's for memory reasons
 
     # 2. Appellate mapping to district cases and get judge. 
     # This is done per circuit to allow for circuit-specific matching logic.
