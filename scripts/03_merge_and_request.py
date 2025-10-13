@@ -2,65 +2,41 @@
 Merge CAP & CL at docket level (for backfilling judge IDs), then
 enqueue OpenAI Batch requests **only for cases not yet answered**.
 """
-from pathlib import Path
-import argparse
-import pandas as pd
+import pandas       as pd
+from pathlib        import Path
 
-from jp.api.submit import run_incremental_batches
+from jp.api.submit  import request_api, check_batch_status, download_batch_output_file, parse_batch_output
 
-DATA_DIR       = Path("data")
-ARTIFACTS_DIR  = Path("artifacts")
+ARTIFACTS_DIR  = Path("data/artifacts")
 BATCH_DIR      = Path("batch_runs")
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 BATCH_DIR.mkdir(parents=True, exist_ok=True)
 
-def _prep_for_api(cl: pd.DataFrame) -> pd.DataFrame:
-    """
-    Prepare a frame with:
-      - id: string without 'CL_' prefix
-      - opinion_text
-    De-dupe on id to avoid resending.
-    """
-    df = cl.copy()
-    if "id" not in df.columns:
-        df["id"] = df["unique_id"].astype(str).str.replace("^CL_", "", regex=True)
-    df = df[["id", "opinion_text"]].dropna(subset=["opinion_text"])
-    df = df.drop_duplicates(subset="id", keep="first")
-    return df
+def main():
+    # 1. Merge the made datasets in the final dataset
+    #######################################################################
+    cl      = pd.read_parquet(ARTIFACTS_DIR  / "cl" / "cl_data_clean.parquet")
+    cap     = pd.read_parquet(ARTIFACTS_DIR  / "cap" / "cap_dataset.parquet")
+    merged  = pd.concat([cap, cl], ignore_index=True)
 
-def main(args):
-    cap = pd.read_parquet(ARTIFACTS_DIR / "cap_clean.parquet")
-    cl  = pd.read_csv(ARTIFACTS_DIR / "cl_data_clean.csv")
+    # 2. To avoid duplicate requests, check which cases have already been answered
+    ########################################################################
+    answered_ids = set()
+    for out_path in ARTIFACTS_DIR.glob("all_api_answers.jsonl"):
+        df = pd.read_json(out_path, lines=True)
+        answered_ids.update(df["unique_id"].astype(str).tolist())
+    print(f"Found {len(answered_ids)} answered cases in {ARTIFACTS_DIR}")
 
-    # optional: backfill CAP judge ids from CL where dockets match and CAP is missing
-    # (simple fill; your heavier logic can live in results.merge_cap_and_cl if you prefer)
-    cap = cap.copy()
-    cl_d = cl[["docket_number","district judge","district judge id"]].dropna(subset=["docket_number"])
-    cap = cap.merge(cl_d, on="docket_number", how="left", suffixes=("","_cl"))
-    for col in ["district judge","district judge id"]:
-        if col in cap.columns and f"{col}_cl" in cap.columns:
-            cap[col] = cap[col].fillna(cap[f"{col}_cl"])
-            cap = cap.drop(columns=[f"{col}_cl"])
+    merged["unique_id"] = merged["unique_id"].astype(str)
+    to_request          = merged[~merged["unique_id"].isin(answered_ids)]
+    print(f"{len(to_request)} cases to request from API")
 
-    cap.to_parquet(ARTIFACTS_DIR / "cap_enriched.parquet", index=False)
-    print(f"[Merge] wrote cap_enriched.parquet ({len(cap):,} rows)")
-
-    # Build and send **incremental** requests from CL
-    df_for_api = _prep_for_api(cl)
-    print(f"[Batch] ready to consider {len(df_for_api):,} CL opinions for API")
-
-    run_incremental_batches(
-        df_for_api,
-        work_dir="batch_runs",
-        full_input_name="overlap_input2.jsonl",
-        missing_input_name="overlap_input2_missing.jsonl",
-        endpoint="/v1/chat/completions",
-        completion_window="24h",
-        max_bytes=200*1024*1024,
-        poll=args.poll,                   # pass --poll if you want to wait
-    )
+    # 3. Put the cases to request through the API pipeline
+    #########################################################################
+    request_api(to_request)
+    check_batch_status()
+    download_batch_output_file()
+    parse_batch_output()
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("--poll", action="store_true", help="Poll the batch to completion and download results now")
-    main(p.parse_args())
+    main()

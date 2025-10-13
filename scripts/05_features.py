@@ -10,14 +10,14 @@ import pandas as pd
 from src.jp.features.engineer   import compute_overturns
 from src.jp.features.labels     import promotion_info_judges
 
-ARTIFACTS_DIR = Path("artifacts")
+ARTIFACTS_DIR = Path("data/artifacts")
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def main(args):
 
     # 1. Making of feature dataset
     #####################################################################################
-    cases       = pd.read_parquet(ARTIFACTS_DIR / "cases_with_answers.parquet")
+    cases       = pd.read_parquet(ARTIFACTS_DIR / 'merged' / "cases_with_answers.parquet")
     judges      = pd.read_csv("data/judge_info.csv")
 
     judges['is_promoted']   = promotion_info_judges(judges) 
@@ -28,7 +28,7 @@ def main(args):
 
     # 2. Output of feature dataset
     #####################################################################################
-    out = ARTIFACTS_DIR / "features.csv"
+    out = ARTIFACTS_DIR / 'features' / "features.csv"
 
     judges.to_csv(out, index=False)
     print(f"[Features] wrote {out} ({len(judges):,} judges)")
