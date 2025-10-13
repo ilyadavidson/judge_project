@@ -14,10 +14,10 @@ ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 def main():
     
     # 1. Building CAP dataset from parquet files
-    ########################################################
+    ###############################################################################
     print("[CAP] building dataset…")
 
-    df_3d      = build_cap_dataset(parquet_root=DATA_DIR / "parquet_files",  # Third circuit
+    df_3d      = build_cap_dataset(parquet_root=DATA_DIR / "data/parquet_files",  # Third circuit
                                    appellate = ["Third Circuit"], 
                                    district = ["Delaware", "New Jersey", "Pennsylvania", "Virgin Islands"])
     df_4d      = build_cap_dataset(parquet_root=DATA_DIR / "parquet_files",  # Fourth circuit
@@ -28,7 +28,7 @@ def main():
 
     # 2. Appellate mapping to district cases and get judge. 
     # This is done per circuit to allow for circuit-specific matching logic.
-    ########################################################
+    ###############################################################################
 
     results = {}
     for df_name, df in [("3d", df_3d), ("4d", df_4d)]:
@@ -45,7 +45,7 @@ def main():
         raise ValueError(f"[CAP] Missing required columns: {', '.join(missing_columns)}")
 
     # 3. Return clean CAP files.
-    ########################################################
+    ##############################################################################
     out_parquet = ARTIFACTS_DIR / "cap_dataset.parquet"
     df_matched.to_parquet(out_parquet, index=False)
     print(f"[CAP] wrote {out_parquet} ({len(df_matched):,} rows)")
