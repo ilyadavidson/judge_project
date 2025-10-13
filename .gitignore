@@ -217,5 +217,6 @@ perhaps delete/
 *.parquet
 *.json
 *.jsonl
+*.ipynb
 .env
 .cl_cache
