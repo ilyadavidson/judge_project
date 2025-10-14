@@ -17,7 +17,7 @@ CL_DIR          = ensure_dir(ARTIFACTS_DIR / "cl")
 SCRAPED_DIR     = ensure_dir(CL_DIR / "scraped")  
 CLEANED_DIR     = ensure_dir(CL_DIR / "cleaned")
 
-def main(which):
+def main(which, resume):
     # 1. Get judges info and load CL data or scrape CL.
     ########################################################
     # judges          = pd.read_csv(DATA_DIR / "judge_info.csv")
@@ -30,12 +30,12 @@ def main(which):
     parts = []
     for cid in pick:
         scraped_csv         = SCRAPED_DIR / f"{cid}_scraped.csv"
-        if scraped_csv.exists():
+        if scraped_csv.exists() and not resume:
             print(f"[CL] Loading existing {scraped_csv}...")                           # load
             raw             = pd.read_csv(scraped_csv)
         else:
             print(f"[CL]s {scraped_csv} not found — scraping {cid} Circuit cases...")   # or scrape
-            raw             = scrape_third_circuit(circuit = cid)
+            raw             = scrape_third_circuit(cid = cid)
 
         # cleaned             = cl_loader(raw, judges)
         per_circuit_clean   = CLEANED_DIR / f"{cid}_cl_data_clean.csv" 
@@ -59,4 +59,4 @@ def main(which):
     print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
 
 if __name__ == "__main__":
-    main(["4th"])  # set to None to do all circuits
+    main(["4th"], resume=True)  # set to None to do all circuits

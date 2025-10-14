@@ -89,8 +89,8 @@ def _robust_cluster_id(it):
             or (it.get("cluster","").rstrip("/").split("/")[-1]
                 if "/clusters/" in str(it.get("cluster","")) else None))
 
-def scrape_third_circuit(circuit, limit=None, checkpoint_every=200):
-    cid, court_code = _norm_circuit(circuit)   
+def scrape_third_circuit(cid, limit=None, checkpoint_every=200):
+    court_code = _norm_circuit(cid)   
     out_csv = SCRAPED_DIR / f"{cid}_scraped.csv" 
 
     # Resume: load any already-saved cluster ids

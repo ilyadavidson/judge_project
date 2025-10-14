@@ -255,27 +255,15 @@ def ensure_dir(*parts) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-def _norm_circuit(c) -> tuple[str, str]:
+def _norm_circuit(c) -> str:
     """
-    Normalize user input to a (cid, court_code) pair.
-    For 1st–11th circuits, CourtListener uses 'ca1' ... 'ca11'.
+    Given a circuit name like '4th', '2nd', or '3d',
+    return only the corresponding CourtListener code 'ca4', 'ca2', etc.
+    Assumes user input is valid and properly formatted.
     """
     s = str(c).strip().lower()
-    alias = {
-        "1d":"1st","2d":"2nd","3d":"3rd","4d":"4th","5d":"5th","6d":"6th",
-        "7d":"7th","8d":"8th","9d":"9th","10d":"10th","11d":"11th"
-    }
-    s = alias.get(s, s)
-    # extract the number part for 1–11
-    if s.endswith(("st","nd","rd","th")):
-        num = "".join(ch for ch in s if ch.isdigit())
-        if num:
-            return s.replace("st","d").replace("nd","d").replace("rd","d").replace("th","d"), f"ca{num}"
-    # accept raw numeric like "3"
-    if s.isdigit() and 1 <= int(s) <= 11:
-        return f"{s}d", f"ca{s}"
-    # (Optional) handle DC/Federal if you add them later:
-    # if s in {"dc","d.c.","cadc"}: return "dc", "cadc"
-    # if s in {"fed","cafc"}:       return "fed","cafc"
-    raise ValueError(f"Unsupported circuit '{c}'. Use e.g. '3d', '3rd', or '3' for numbered circuits.")
+    num = "".join(ch for ch in s if ch.isdigit())
+    if not num:
+        raise ValueError(f"Expected a numbered circuit like '4th' or '3d', got '{c}'")
+    return f"ca{num}"
 
