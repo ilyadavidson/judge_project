@@ -21,19 +21,38 @@ RETRY = {429,500,502,503,504}
 
 SCRAPED_DIR = ensure_dir(("data/artifacts/cl/scraped"))
 
-def _get_json(url, params=None, timeout=60, attempts=6):
-    delay=0.7
+def _get_json(url, params=None, timeout=60, attempts=10):
+    delay = 0.8
+    backoff = 1.7
+    last_err = None
     for a in range(attempts):
-        r = session.get(url, params=params if a==0 else None, timeout=timeout)
-        if r.status_code in RETRY:
-            if r.status_code==429 and (ra:=r.headers.get("Retry-After")):
-                try: time.sleep(float(ra))
-                except: pass
-            time.sleep(min(delay*(2**a)+random.uniform(0,0.4), 18))
+        try:
+            r = session.get(url, params=params if a == 0 else None, timeout=timeout)
+        except (requests.ReadTimeout, requests.ConnectTimeout, requests.ConnectionError) as e:
+            last_err = e
+            # exponential backoff with jitter
+            time.sleep(min(delay * (backoff ** a) + random.uniform(0, 0.6), 30))
             continue
+
+        # retry on transient status codes
+        if r.status_code in RETRY:
+            # respect Retry-After (CourtListener may send this for 429)
+            ra = r.headers.get("Retry-After")
+            if ra:
+                try:
+                    time.sleep(float(ra))
+                except Exception:
+                    pass
+            time.sleep(min(delay * (backoff ** a) + random.uniform(0, 0.6), 30))
+            continue
+
         r.raise_for_status()
         return r.json()
-    r.raise_for_status()
+
+    # out of attempts
+    if last_err:
+        raise last_err
+    r.raise_for_status()  # will raise the last HTTP error if we got here
 
 def _html_to_text(h):
     soup=BeautifulSoup(h or "","html.parser")
@@ -121,7 +140,11 @@ def scrape_third_circuit(cid, limit=None, checkpoint_every=200):
     try:
         total_kept = len(saved_cids)
         while url and (limit is None or total_kept < limit):
-            data = _get_json(url, params=params); params=None
+            try:
+                data = _get_json(url, params=params); params=None
+            except Exception as e:
+                time.sleep(5)
+                continue
             for it in data.get("results", []):
                 if limit is not None and total_kept >= limit: break
 
