@@ -6,8 +6,6 @@ TO-DO: filter for judge being in the appropriate court.
 import re, unicodedata
 import pandas       as pd
 
-from jp.cl.scrape   import scrape_third_circuit 
-
 def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame) -> pd.DataFrame:
     """Add 'district judge' (last name, lowercase) and 'district judge id' (Int64) to cl_data.
        Priority: parse judge near the 'Appeal from ...' block; else use generic District Judge patterns.

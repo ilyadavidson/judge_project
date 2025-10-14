@@ -6,7 +6,8 @@ import os
 import pandas           as pd
 
 from pathlib            import Path
-from jp.cl.extract      import cl_loader, scrape_third_circuit
+from jp.cl.scrape       import scrape_third_circuit
+from jp.cl.extract      import cl_loader
 from jp.utils.text      import ensure_dir
 from jp.utils.constants import circuits
 
