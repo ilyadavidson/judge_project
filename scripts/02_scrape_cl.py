@@ -20,7 +20,7 @@ CLEANED_DIR     = ensure_dir(CL_DIR / "cleaned")
 def main(which):
     # 1. Get judges info and load CL data or scrape CL.
     ########################################################
-    judges          = pd.read_csv(DATA_DIR / "judge_info.csv")
+    # judges          = pd.read_csv(DATA_DIR / "judge_info.csv")
     
     if which is None:
         pick        = [c for c in circuits() if c not in {"dc","fed"}]
@@ -37,12 +37,12 @@ def main(which):
             print(f"[CL]s {scraped_csv} not found — scraping {cid} Circuit cases...")   # or scrape
             raw             = scrape_third_circuit(circuit = cid)
 
-        cleaned             = cl_loader(raw, judges)
+        # cleaned             = cl_loader(raw, judges)
         per_circuit_clean   = CLEANED_DIR / f"{cid}_cl_data_clean.csv" 
 
-        cleaned.to_csv(per_circuit_clean, index=False)
-        print(f"[CL] wrote {per_circuit_clean} ({len(cleaned):,} rows)")
-        parts.append(cleaned)
+        # cleaned.to_csv(per_circuit_clean, index=False)
+        # print(f"[CL] wrote {per_circuit_clean} ({len(cleaned):,} rows)")
+        # parts.append(cleaned)
 
     # 2.1. Ensure required columns are present
     cl          = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
