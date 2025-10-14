@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 from tempfile import NamedTemporaryFile  
+from jp.utils.text import _norm_circuit, ensure_dir
 
 load_dotenv()
 BASE_SEARCH = "https://www.courtlistener.com/api/rest/v4/search/"
@@ -17,6 +18,8 @@ session.headers.update({
     "User-Agent": os.getenv("COURTLISTENER_USER_AGENT","courtlistener-scraper/1.0")
 })
 RETRY = {429,500,502,503,504}
+
+SCRAPED_DIR = ensure_dir(("data/artifacts/cl/scraped"))
 
 def _get_json(url, params=None, timeout=60, attempts=6):
     delay=0.7
@@ -86,7 +89,10 @@ def _robust_cluster_id(it):
             or (it.get("cluster","").rstrip("/").split("/")[-1]
                 if "/clusters/" in str(it.get("cluster","")) else None))
 
-def scrape_third_circuit(limit=None, out_csv="third_circuit_cases.csv", checkpoint_every=200):
+def scrape_third_circuit(circuit, limit=None, checkpoint_every=200):
+    cid, court_code = _norm_circuit(circuit)   
+    out_csv = SCRAPED_DIR / f"{cid}_scraped.csv" 
+
     # Resume: load any already-saved cluster ids
     saved_cids = set()
     if os.path.exists(out_csv):
@@ -98,7 +104,8 @@ def scrape_third_circuit(limit=None, out_csv="third_circuit_cases.csv", checkpoi
 
     rows_buffer = []
     url, params = BASE_SEARCH, {
-        "court":"ca3", "type":"o",
+        "court": court_code, 
+        "type":"o",
         "page_size":100,
         "fields":"id,cluster_id,cluster,caseName,docketNumber,dateFiled"
     }
@@ -169,7 +176,5 @@ def scrape_third_circuit(limit=None, out_csv="third_circuit_cases.csv", checkpoi
 
     except KeyboardInterrupt:
         flush_buffer()
-        df = pd.read_csv(out_csv) if os.path.exists(out_csv) else pd.DataFrame(columns=["name","docket_number","decision_date","opinion_text"])
-        if "_cid" in df.columns:
-            df = df[["name","docket_number","decision_date","opinion_text"]]
-        return df
+
+    return 

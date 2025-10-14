@@ -25,3 +25,7 @@ circuits_to_district = {
     "dc": dict(appellate=["D.C. Circuit"],
                district=["District of Columbia"]),
 }
+
+def circuits():
+    """Return a list of all available circuit codes (e.g. ['1st','2nd',...,'dc'])."""
+    return list(circuits_to_district.keys())
