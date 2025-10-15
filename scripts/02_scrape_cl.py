@@ -45,18 +45,18 @@ def main(which, resume):
         # parts.append(cleaned)
 
     # 2.1. Ensure required columns are present
-    cl          = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-    required    = {"district judge id","district judge","opinion_text","unique_id","name","docket_number"}
-    missing     = required - set(cl.columns)
-    if missing:
-        raise ValueError(f"[CL] Missing required columns: {', '.join(missing)}")
+    # cl          = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    # required    = {"district judge id","district judge","opinion_text","unique_id","name","docket_number"}
+    # missing     = required - set(cl.columns)
+    # if missing:
+    #     raise ValueError(f"[CL] Missing required columns: {', '.join(missing)}")
 
-    # 2. Return clean CL files.
-    ########################################################
-    out_name = "cl_data_clean.csv" if which is None else f"cl_data_clean_{'_'.join(pick)}.csv"
-    out_csv  = CL_DIR / out_name
-    cl.to_csv(out_csv, index=False)
-    print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
+    # # 2. Return clean CL files.
+    # ########################################################
+    # out_name = "cl_data_clean.csv" if which is None else f"cl_data_clean_{'_'.join(pick)}.csv"
+    # out_csv  = CL_DIR / out_name
+    # cl.to_csv(out_csv, index=False)
+    # print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
 
 if __name__ == "__main__":
-    main(["4th"], resume=True)  # set to None to do all circuits
+    main(["5th", "6th"], resume=True)  # set to None to do all circuits
