@@ -70,3 +70,20 @@ def _load_mapping(path: str) -> Dict[str, str]:
             out[nk] = nv
     return out
 
+def load_case_results(path) -> pd.DataFrame:
+    records = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            if rec.get("error"):
+                continue
+            try:
+                content = rec["response"]["body"]["choices"][0]["message"]["content"]
+                obj = json.loads(content)  
+            except Exception:
+                continue
+            obj["custom_id"] = rec.get("custom_id") 
+            records.append(obj)
+    return pd.DataFrame.from_records(records)

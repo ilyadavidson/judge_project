@@ -127,7 +127,7 @@ def build_input(df,
     :param mx_tk:      Maximum tokens for each case text.
     """
 
-    cases  = text_builder(df, limit=None, mx_tk=mx_tk) # should be +- 50.000 for Third Circuit
+    cases = text_builder(df, limit=None, mx_tk=mx_tk) 
     inp_path.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with inp_path.open("w", encoding="utf-8") as f:

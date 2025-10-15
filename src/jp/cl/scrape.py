@@ -2,13 +2,15 @@
 This file scrapes Court Listener for data 
 """
 
-import os, io, re, time, random, requests, pandas as pd
-from dotenv import load_dotenv
-from bs4 import BeautifulSoup
-from pypdf import PdfReader
-from tempfile import NamedTemporaryFile  
-from jp.utils.text import _norm_circuit, ensure_dir
+import os, io, re, time, random, requests, pandas   as pd
+from dotenv                                         import load_dotenv
+from bs4                                            import BeautifulSoup
+from pypdf                                          import PdfReader
+from tempfile                                       import NamedTemporaryFile  
+from jp.utils.text                                  import _norm_circuit, ensure_dir
 
+# SCRAPE TOKENS
+###############################################################################
 load_dotenv()
 BASE_SEARCH = "https://www.courtlistener.com/api/rest/v4/search/"
 CLUSTER_URL = "https://www.courtlistener.com/api/rest/v4/clusters/{id}/"
@@ -21,22 +23,21 @@ RETRY = {429,500,502,503,504}
 
 SCRAPED_DIR = ensure_dir(("data/artifacts/cl/scraped"))
 
+###############################################################################
 def _get_json(url, params=None, timeout=60, attempts=10):
-    delay = 0.8
-    backoff = 1.7
-    last_err = None
+    """Get JSON from CourtListener with retries on transient errors."""
+    delay       = 0.8
+    backoff     = 1.7
+    last_err    = None
     for a in range(attempts):
         try:
             r = session.get(url, params=params if a == 0 else None, timeout=timeout)
         except (requests.ReadTimeout, requests.ConnectTimeout, requests.ConnectionError) as e:
             last_err = e
-            # exponential backoff with jitter
             time.sleep(min(delay * (backoff ** a) + random.uniform(0, 0.6), 30))
             continue
 
-        # retry on transient status codes
         if r.status_code in RETRY:
-            # respect Retry-After (CourtListener may send this for 429)
             ra = r.headers.get("Retry-After")
             if ra:
                 try:
@@ -49,17 +50,18 @@ def _get_json(url, params=None, timeout=60, attempts=10):
         r.raise_for_status()
         return r.json()
 
-    # out of attempts
     if last_err:
         raise last_err
     r.raise_for_status()  # will raise the last HTTP error if we got here
 
 def _html_to_text(h):
+    """Convert HTML to plain text, removing scripts/styles and excessive newlines."""
     soup=BeautifulSoup(h or "","html.parser")
     for b in soup(["script","style"]): b.decompose()
     return re.sub(r"\n{3,}","\n\n", soup.get_text("\n")).strip()
 
 def _pdf_to_text(b):
+    """Extract text from PDF bytes, joining pages."""
     reader=PdfReader(io.BytesIO(b))
     return "\n\f\n".join((p.extract_text() or "") for p in reader.pages)
 

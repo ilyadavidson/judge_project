@@ -20,7 +20,7 @@ def main():
     judges      = pd.read_csv("data/judge_info.csv")
 
     judges['is_promoted']   = promotion_info_judges(judges) 
-    judges['overturn_rate'] = compute_overturns(judges, cases)
+    judges['overturn_rate'] = compute_overturns(judges, cases, cutoff=3) 
 
     keep_cols = ["judge id", "is_promoted", "overturn_rate", "aba rating", "gender", "ethnicity"]
     judges = judges[[c for c in keep_cols if c in judges.columns]]

@@ -15,8 +15,8 @@ BATCH_DIR.mkdir(parents=True, exist_ok=True)
 def main():
     # 1. Merge the made datasets in the final dataset
     #######################################################################
-    cl      = pd.read_parquet(ARTIFACTS_DIR  / "cl" / "cl_data_clean.parquet")
-    cap     = pd.read_parquet(ARTIFACTS_DIR  / "cap" / "cap_dataset.parquet")
+    cl      = pd.read_parquet(ARTIFACTS_DIR  / "cl" / "cl_clean.parquet")
+    cap     = pd.read_parquet(ARTIFACTS_DIR  / "cap" / "cap_clean.parquet")
     merged  = pd.concat([cap, cl], ignore_index=True)
 
     # 2. To avoid duplicate requests, check which cases have already been answered

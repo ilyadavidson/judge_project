@@ -38,7 +38,7 @@ def main(which, resume):
             raw             = scrape_third_circuit(cid = cid)
 
         # cleaned             = cl_loader(raw, judges)
-        per_circuit_clean   = CLEANED_DIR / f"{cid}_cl_data_clean.csv" 
+        # per_circuit_clean   = CLEANED_DIR / f"{cid}_cl_data_clean.csv" 
 
         # cleaned.to_csv(per_circuit_clean, index=False)
         # print(f"[CL] wrote {per_circuit_clean} ({len(cleaned):,} rows)")

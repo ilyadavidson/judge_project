@@ -1,7 +1,15 @@
 import pandas as pd
 import numpy as np
 
-def compute_overturns(judges: pd.DataFrame, full_data: pd.DataFrame) -> pd.DataFrame:
+def compute_overturns(judges: pd.DataFrame, full_data: pd.DataFrame, cutoff) -> pd.DataFrame:
+    """
+    For each judge, compute the overturn rate of their appealed cases. 
+    
+    :param judges: DataFrame with judge information, must include 'judge id' and 'promotion_date'.
+    :param full_data: DataFrame with case information, must include 'district judge id', 'opinion', and 'decision_date'.
+    :param cutoff: Number of months before promotion to consider cases for overturn rate calculation.
+    """
+    
     df = full_data.copy()
     df["judge id"]      = pd.to_numeric(df["district judge id"], errors="coerce").astype("Int64")
     df["opinion"]       = df["opinion"].astype(str).str.lower()
@@ -9,7 +17,7 @@ def compute_overturns(judges: pd.DataFrame, full_data: pd.DataFrame) -> pd.DataF
 
     j = judges.copy()
     j["promotion_date"] = pd.to_datetime(j["promotion_date"], errors="coerce")
-    j["cutoff"]         = j["promotion_date"] - pd.DateOffset(months=3)
+    j["cutoff"]         = j["promotion_date"] - pd.DateOffset(months=cutoff)
 
     m = df.merge(j[["judge id","cutoff"]], on="judge id", how="inner")
     m = m[m["decision_date"].notna() & (m["cutoff"].isna() | (m["decision_date"] <= m["cutoff"]))]
