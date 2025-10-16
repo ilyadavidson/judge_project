@@ -59,4 +59,4 @@ def main(which, resume):
     # print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
 
 if __name__ == "__main__":
-    main(["5th", "6th"], resume=True)  # set to None to do all circuits
+    main(["6th"], resume=True)  # set to None to do all circuits
