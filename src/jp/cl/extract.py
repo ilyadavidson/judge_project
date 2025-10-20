@@ -6,41 +6,104 @@ TO-DO: filter for judge being in the appropriate court.
 import re, unicodedata
 import pandas       as pd
 
-def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame) -> pd.DataFrame:
-    """Add 'district judge' (last name, lowercase) and 'district judge id' (Int64) to cl_data.
-       Priority: parse judge near the 'Appeal from ...' block; else use generic District Judge patterns.
+def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame, cid) -> pd.DataFrame:
+    """
+    Add 'district judge' (last name, lowercase) and 'district judge id' (Int64) to cl_data,
+    using circuit-specific extraction patterns determined by `cid` (e.g., '4th', '2nd', '9th').
+    Court name is still parsed by the existing patterns and used for ID disambiguation.
     """
 
     # ---------- helpers ----------
-    def _norm(s): return unicodedata.normalize("NFKD", str(s or "")).replace("\u00A0"," ").strip()
-    def _canon(s): return re.sub(r"[^a-z]", "", _norm(s).lower())
-    def _strip_honorifics(s):
-        s = re.sub(r"(?i)\b(the\s+)?honorable\b|^hon\.?\s*", "", _norm(s))
-        return re.sub(r"\s+", " ", s).strip(" ,;")
+    _norm = lambda s: unicodedata.normalize("NFKD", str(s or "")).replace("\u00A0", " ").strip()
+    _canon = lambda s: re.sub(r"[^a-z]", "", _norm(s).lower())
+
+    def _strip_honorifics(s: str) -> str:
+        s = re.sub(r"(?i)\b(?:the\s+)?honorable\b|^hon\.?\s*", "", _norm(s))
+        return re.sub(r"\s+", " ", s).strip(" ,;.")
+
     SUFFIX = {"jr","sr","ii","iii","iv","v"}
-    def _split_name(full):
+    def _split_name(full: str):
         toks = re.findall(r"[A-Za-z][A-Za-z'\.-]*", _strip_honorifics(full))
         while toks and toks[-1].rstrip(".").lower() in SUFFIX: toks.pop()
         if not toks: return "",""
         first = re.sub(r"\.$","", toks[0]); last = re.sub(r"\.$","", toks[-1])
         return first, last
 
+    def _ascii(s: str) -> str:
+        s = unicodedata.normalize("NFKD", s or "")
+        s = s.replace("–","-").replace("—","-").replace("\u00A0"," ")
+        return s.encode("ascii","ignore").decode("ascii")
+
     # court extraction (full and abbrev)
     pat_court_full  = re.compile(r"(?im)(?:on\s+)?appeal\s+from\s+the\s+united\s+states\s+district\s+court\s+for\s+the\s+([^\r\n,]+)")
-    pat_court_short = re.compile(r"(?im)appeal\s+from[:\s,]*([A-Z]\.[A-Z]\.[A-Za-z]+|[A-Z]\.[A-Z]\.[A-Z]\.|[A-Z]\.[A-Z]\.[A-Za-z]+\.[A-Za-z]+|[A-Z]\.[A-Za-z]+\.[A-Za-z]+)")  # e.g., D.N.J., E.D. Pa., W.D.Pa.
+    pat_court_short = re.compile(r"(?im)appeal\s+from[:\s,]*([A-Z]\.[A-Z]\.[A-Za-z]+|[A-Z]\.[A-Z]\.[A-Z]\.|[A-Z]\.[A-Z]\.[A-Za-z]+\.[A-Za-z]+|[A-Z]\.[A-Za-z]+\.[A-Za-z]+)")
 
-    # “District Judge …” (after), “…, District Judge” (before), and line fallback
-    pat_after  = re.compile(r"(?im)\bdistrict\s+judge\b[:\s,]*?(?:(?:the\s+)?honorable|hon\.)?\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])")
-    pat_before = re.compile(r"(?im)([A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*,\s*(?:U\.S\.\s*)?district\s+judge\b")
-    pat_linedj = re.compile(r"(?im)^.*\bdistrict\s+judge\b.*$")
+    # generic patterns (used as fallbacks/for shared pieces)
+    pat_after   = re.compile(r"(?im)\bdistrict\s+judge\b[:\s,]*?(?:(?:the\s+)?honorable|hon\.)?\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])")
+    pat_before  = re.compile(r"(?im)([A-Z][A-Za-z'\.\- ]*[A-Za-z](?:\s+(?:Jr|Sr|II|III|IV|V)\.?)?)\s*,\s*(?:U\.S\.\s*)?(?:Chief\s+|Senior\s+)?district\s+judge\b")
+    pat_inline  = re.compile(
+        r"(?im)(?:"
+        r"\b(?:U\.?\s*S\.?\s*)?(?:(?:Chief|Senior)\s+)?(?:Magistrate\s+Judge|District\s+Judge|Judge)\b"
+        r"[:\s,]*?(?:(?:the\s+)?honorable|hon\.)?\s*"
+        r"([A-Z][A-Za-z'\.\- ]*[A-Za-z](?:\s+(?:Jr|Sr|II|III|IV|V)\.?)?)"     # group(1): title → name
+        r"|"
+        r"([A-Z][A-Za-z'\.\- ]*[A-Za-z](?:\s+(?:Jr|Sr|II|III|IV|V)\.?)?)"     # group(2): name → title
+        r"\s*,?\s*(?:-|—)?\s*(?:(?:Chief|Senior)\s+)?(?:U\.?\s*S\.?\s*)?(?:Magistrate\s+Judge|District\s+Judge|Judge)\b"
+        r")"
+    )
+    pat_commaJ  = re.compile(r"(?im)^\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*,\s*(?:D\.?J\.?|J\.)\s*$")
+    pat_linedj  = re.compile(r"(?im)^.*\bdistrict\s+judge\b.*$")
 
-    # near-appeal name patterns (parenthetical, “X, J.” / “X, D.J.”, inline “District Judge: …”)
-    pat_paren  = re.compile(r"(?im)\(\s*(?:the\s+)?honorable|hon\.\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*\)")
-    pat_commaJ = re.compile(r"(?im)^\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*,\s*(?:D\.?J\.?|J\.)\s*$")
-    pat_inline = re.compile(r"(?im)\bdistrict\s+judge\b[:\s,]*?(?:(?:the\s+)?honorable|hon\.)?\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])")
+    # ---- circuit-specific patterns (first match wins; capture group 1 contains the name) ----
+    circuit_num = (re.search(r"\d+", str(cid)) or re.match(r"", "")).group(0)  # "4" for "4th"
+    PAT_BY_CIRCUIT = {
+        "1": [  # [Hon. William G. Young, U.S. District Judge]
+            re.compile(r"(?im)\[\s*(?:Hon\.?|Honorable)\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z](?:\s+(?:Jr|Sr|II|III|IV|V)\.?)?)\s*,\s*U\.?\s*S\.?\s*District\s*Judge\s*\]"),
+        ],
+        "2": [  # No. 15-cv-..., Edgardo Ramos, Judge.
+            re.compile(r"(?im)\bNo(?:s)?\.\s*[\w:;\- ]+[,-]\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z](?:\s+(?:Jr|Sr|II|III|IV|V)\.?)?)\s*,\s*Judge\."),
+        ],
+        "3": [
+            re.compile(
+                r"(?im)\b(?:Chief|Senior\s+)?District\s+Judge:\s*(?:Hon\.?|Honorable)?\s*"
+                r"([A-Z][A-Za-z'\.\- ]*[A-Za-z](?:\s+(?:Jr|Sr|II|III|IV|V)\.?)?)"
+            ),
+        ],
+        "4": [
+    # at Charlotte. Max O. Cogburn, Jr., District Judge.
+    # at Alexandria. Rossie David Alston, Jr., District Judge.
+    # at Asheville. William G. Young, Senior District Judge for the United States District Court
+        re.compile(
+            r"(?im)\bat\s+\s*[A-Za-z\.\- ]+\.\s*"
+            r"([A-Z][A-Za-z'\.\- ]*[A-Za-z]"
+            r"(?:,\s*(?:Jr|Sr|II|III|IV|V)\.?)?)"                        # optional suffix like ", Jr."
+            r"\s*,\s*(?:Chief|Senior)?\s*District\s+Judge"               # allow Chief/Senior
+            r"(?:\s+for\s+the\s+United\s+States(?:\s+District\s+Court)?)?"# optional trailing clause
+            r"\.?"                                                       # optional period
+        ),
+        # Slightly more permissive backup in case punctuation/spacing varies
+        re.compile(
+            r"(?im)\bat\s+[^\S\r\n]*[A-Za-z\.\- ]+\.\s*"
+            r"([A-Z][A-Za-z'\.\- ]*[A-Za-z]"
+            r"(?:,\s*(?:Jr|Sr|II|III|IV|V)\.?)?)"
+            r"\s*,\s*(?:Chief|Senior)?\s*District\s+Judge"
+            r"(?:\s+for\s+the\s+United\s+States(?:\s+District\s+Court)?)?"
+            r"\.?"
+        ),
+    ],
+        "6": [  # No. ... — Jane M. Beckering, District Judge.
+            re.compile(r"(?im)\bNo(?:s)?\.\s*[\w:;\-]+(?:\s*;\s*[\w:;\-]+)?\s*[-—]\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z](?:\s+(?:Jr|Sr|II|III|IV|V)\.?)?)\s*,\s*District\s+Judge\."),
+        ],
+        "7": [  # — Damon R. Leichty, Judge. / — Nancy Joseph, Magistrate Judge.
+            re.compile(r"(?im)[-—]\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*,\s*(?:Magistrate\s+)?Judge\."),
+        ],
+        "9": [  # Robert J. Bryan, District Judge, Presiding
+            re.compile(r"(?im)\bAppeal\s+from\s+the\s+United\s+States\s+District\s+Court.*?\n?\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*,\s*District\s+Judge,\s*Presiding"),
+        ],
+    }
 
-    # Judges reference with canonical keys
-    J              = judges_info.copy()
+    # Judges reference table
+    J = judges_info.copy()
     J["jid"]       = pd.to_numeric(J["judge id"], errors="coerce").astype("Int64")
     J["last_key"]  = J["last name"].map(_canon)
     J["first_key"] = J["first name"].map(lambda x: _canon(re.sub(r"\.$","", (str(x).split() or [""])[0])))
@@ -50,79 +113,58 @@ def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame
         first,last = _split_name(full_name)
         last_key, first_key, court_key = _canon(last), _canon(first), _canon(court_str)
         if not last_key: return "", pd.NA
-        cand = J[J["last_key"]==last_key]
-        if len(cand)==1: return last.lower(), cand["jid"].iloc[0]
-        if len(cand)>1 and first_key:
-            c2 = cand[cand["first_key"]==first_key]
-            if len(c2)==1: return last.lower(), c2["jid"].iloc[0]
-            if len(c2)>1 and court_key:
+        cand = J[J["last_key"] == last_key]
+        if len(cand) == 1: return last.lower(), cand["jid"].iloc[0]
+        if len(cand) > 1 and first_key:
+            c2 = cand[cand["first_key"] == first_key]
+            if len(c2) == 1: return last.lower(), c2["jid"].iloc[0]
+            if len(c2) > 1 and court_key:
                 c3 = c2[c2["court_key"].apply(lambda x: bool(x) and (court_key in x or x in court_key))]
                 if len(c3): return last.lower(), c3["jid"].iloc[0]
-        if len(cand)>1 and court_key:
+        if len(cand) > 1 and court_key:
             c4 = cand[cand["court_key"].apply(lambda x: bool(x) and (court_key in x or x in court_key))]
-            if len(c4)==1: return last.lower(), c4["jid"].iloc[0]
+            if len(c4) == 1: return last.lower(), c4["jid"].iloc[0]
         return last.lower(), pd.NA
 
-    def _extract_from_appeal_block(txt: str):
-        if not txt: return "",""
-        lines = _norm(txt).splitlines()
-        # locate the first “appeal from …” line
-        idx = next((i for i,l in enumerate(lines) if re.search(r"(?i)\bappeal\s+from\b", l)), None)
-        if idx is None:  # also try “On Appeal from …”
-            idx = next((i for i,l in enumerate(lines) if re.search(r"(?i)\bon\s+appeal\s+from\b", l)), None)
-        if idx is None: return "",""
-        block = lines[idx: min(len(lines), idx+10)]  # look ahead a few lines
+    def _extract_court(txt: str) -> str:
+        m = pat_court_full.search(txt) or pat_court_full.search(_ascii(txt))
+        if m: return m.group(1).strip()
+        m2 = pat_court_short.search(txt)
+        return m2.group(1).strip() if m2 else ""
 
-        # court (prefer full)
-        m = pat_court_full.search("\n".join(block)) or pat_court_full.search(txt)
-        court = m.group(1).strip() if m else ""
-        if not court:
-            m2 = pat_court_short.search(lines[idx])
-            court = m2.group(1).strip() if m2 else ""
+    def _extract_name_by_circuit(txt: str) -> str:
+        T = _ascii(txt)
+        # try circuit-specific patterns first (if known)
+        if circuit_num in PAT_BY_CIRCUIT:
+            for pat in PAT_BY_CIRCUIT[circuit_num]:
+                m = pat.search(T)
+                if m:
+                    return _strip_honorifics(m.group(1))
 
-        # 1) parenthetical "(Honorable …)"
-        for l in block:
-            mp = re.search(r"(?i)\((?:\s*(?:the\s+)?honorable|hon\.)\s*([A-Z][A-Za-z'\.\- ]*[A-Za-z])\s*\)", l)
-            if mp: return _strip_honorifics(mp.group(1)), court
+        # otherwise fall back to robust generic shapes
+        m = pat_inline.search(T)
+        if m:
+            return _strip_honorifics(m.group(1) or m.group(2))
+        m = pat_after.search(T)
+        if m: return _strip_honorifics(m.group(1))
+        m = pat_before.search(T)
+        if m: return _strip_honorifics(m.group(1))
 
-        # 2) a bare line like "Mencer, J." / "Fullam, D.J."
-        for l in block:
-            mj = pat_commaJ.match(l.strip())
-            if mj: return _strip_honorifics(mj.group(1)), court
-
-        # 3) inline “District Judge: …” within block
-        for l in block:
-            mi = pat_inline.search(l)
-            if mi: return _strip_honorifics(mi.group(1)), court
-
-        # 4) any “District Judge …” within the block line
-        for l in block:
-            ma = pat_after.search(l)
-            if ma: return _strip_honorifics(ma.group(1)), court
-            mb = pat_before.search(l)
-            if mb: return _strip_honorifics(mb.group(1)), court
-
-        return "",""
-
-    def _extract_fallback(txt: str):
-        if not txt: return "",""
-        # Prefer precise single-line “after” then “before”
-        ma = pat_after.search(txt)
-        if ma: return _strip_honorifics(ma.group(1)), ""
-        mb = pat_before.search(txt)
-        if mb: return _strip_honorifics(mb.group(1)), ""
-        # scan first line mentioning “district judge” and try inline patterns
-        mline = pat_linedj.search(txt)
-        if mline:
-            line = mline.group(0)
+        # try a quick scan line containing 'district judge' + inline parse
+        ml = pat_linedj.search(T)
+        if ml:
+            line = ml.group(0)
             mi = pat_inline.search(line)
-            if mi: return _strip_honorifics(mi.group(1)), ""
-            mj = pat_before.search(line)
-            if mj: return _strip_honorifics(mj.group(1)), ""
-        return "",""
+            if mi: return _strip_honorifics(mi.group(1) or mi.group(2))
+            mb = pat_before.search(line)
+            if mb: return _strip_honorifics(mb.group(1))
 
-    def _ascii(s: str) -> str:
-        return unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii")
+        # super last-ditch: a bare "X, D.J." line
+        for l in _ascii(txt).splitlines():
+            mj = pat_commaJ.match(l.strip())
+            if mj: return _strip_honorifics(mj.group(1))
+
+        return ""
 
     # ---------- apply ----------
     out = cl_data.copy()
@@ -130,22 +172,21 @@ def extract_district_judge_info(cl_data: pd.DataFrame, judges_info: pd.DataFrame
 
     names, courts = [], []
     for t in texts:
-        t = _ascii(t)
-        n,c = _extract_from_appeal_block(t)
-        if not n: n,c = _extract_fallback(t)
-        names.append(n); courts.append(c)
+        name  = _extract_name_by_circuit(t)
+        court = _extract_court(t)
+        names.append(name); courts.append(court)
 
     # resolve to ids
-    resolved = [ _resolve_id(n,c) for n,c in zip(names, courts) ]
+    resolved = [_resolve_id(n, c) for n, c in zip(names, courts)]
     rdf = pd.DataFrame(resolved, columns=["district judge","district judge id"], index=out.index)
     out["district judge"]    = rdf["district judge"]
     out["district judge id"] = rdf["district judge id"].astype("Int64")
 
-    out                      = out[out['district judge id'].notna()]
+    # keep only resolved
+    out = out[out["district judge id"].notna()]
     return out
 
-
-def cl_loader(cl_data, judges):
+def cl_loader(cl_data, judges, cid):
     """
     Given raw CL data and judges info, return cleaned CL data with district judge info based on if the terms "Appeal from" or "District Judge" are found in the opinion text.
     """
@@ -153,7 +194,7 @@ def cl_loader(cl_data, judges):
     PHRASE = r"(?i)(?<!\w)(?:on[\s\u00A0]+)?appeal[\s\u00A0]+from(?!\w)|(?<!\w)district[\s\u00A0]+judge(?!\w)"
 
     cl_regex_hits               = cl_data[cl_data["opinion_text"].str.contains(PHRASE, case=False, regex=True, na=False)].reset_index(drop=True)
-    cl_clean                    = extract_district_judge_info(cl_regex_hits, judges)
+    cl_clean                    = extract_district_judge_info(cl_regex_hits, judges, cid)
 
     cl_clean['is_appellate']    = 1 # all are appellate cases, but keep for consistency with CAP data
     cl_clean['unique_id']       = 'CL_' + cl_clean.index.astype(str)

@@ -6,7 +6,7 @@ import os
 import pandas           as pd
 
 from pathlib            import Path
-from jp.cl.scrape       import scrape_third_circuit
+from jp.cl.scrape       import scrape_circuit
 from jp.cl.extract      import cl_loader
 from jp.utils.text      import ensure_dir
 from jp.utils.constants import circuits
@@ -35,16 +35,16 @@ def main(which, resume):
             raw             = pd.read_csv(scraped_csv)
         else:
             print(f"[CL]s {scraped_csv} not found — scraping {cid} Circuit cases...")   # or scrape
-            raw             = scrape_third_circuit(cid = cid)
+            raw             = scrape_circuit(cid = cid)
 
-        # cleaned             = cl_loader(raw, judges)
-        # per_circuit_clean   = CLEANED_DIR / f"{cid}_cl_data_clean.csv" 
+    #     cleaned             = cl_loader(raw, judges, cid)
+    #     per_circuit_clean   = CLEANED_DIR / f"{cid}_cl_data_clean.csv" 
 
-        # cleaned.to_csv(per_circuit_clean, index=False)
-        # print(f"[CL] wrote {per_circuit_clean} ({len(cleaned):,} rows)")
-        # parts.append(cleaned)
+    #     cleaned.to_csv(per_circuit_clean, index=False)
+    #     print(f"[CL] wrote {per_circuit_clean} ({len(cleaned):,} rows)")
+    #     parts.append(cleaned)
 
-    # 2.1. Ensure required columns are present
+    # # 2.1. Ensure required columns are present
     # cl          = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     # required    = {"district judge id","district judge","opinion_text","unique_id","name","docket_number"}
     # missing     = required - set(cl.columns)
@@ -59,4 +59,4 @@ def main(which, resume):
     # print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
 
 if __name__ == "__main__":
-    main(["6th"], resume=True)  # set to None to do all circuits
+    main([ "7th", "8th", "9th"], resume=False)  # set to None to do all circuits
