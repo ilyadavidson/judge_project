@@ -37,13 +37,14 @@ def compute_overturns(judges: pd.DataFrame, full_data: pd.DataFrame, cutoff) -> 
                                    out["overturned_appealed_cases"] / out["appealed_cases"], np.nan)
     return out["overturnrate"]
 
-def prestige_calculator(judges, weight_a, weight_b, weight_c):
+def prestige_calculator(j, weight_a, weight_b, weight_c):
     """
     Compute a prestige index for each judge based on their education and career. Indicators are law school rank, clerkship experience, and law professor status.
 
     :param weight_*: Weights for each indicator in the prestige index calculation. For now, set as 1 as we have no prior on their relative importance. 
     Could do a logistic regression on promotion and have those coefficients be the weights. 
     """
+    judges  = j.copy()
 
     a1      =  weight_a
     a2      =  weight_b
@@ -138,8 +139,8 @@ def us_support_calculator(j: pd.DataFrame, cases: pd.DataFrame,) -> pd.DataFrame
     N                       = c.groupby('opinion_author_id')['ruled_for_US'].size()
 
     j                       = j.copy()
-    j['US_support_rate']    = j['judge'].map(rate)
-    j['US_support_N']       = j['judge'].map(N).fillna(0).astype(int)
+    j['US_support_rate']    = j['judge id'].map(rate)
+    j['US_support_N']       = j['judge id'].map(N).fillna(0).astype(int)
 
     return j['US_support_rate'], j['US_support_N']
 
@@ -155,7 +156,7 @@ def politicality_calculator(j, c,
                .groupby(case_judge_col)[score_col]
                .agg(Politicality='mean', Politicality_N='size'))
     
-    j.merge(stats, left_on=judge_id_col, right_index=True, how='left')
+    j     = j.merge(stats, left_on=judge_id_col, right_index=True, how='left')
     
     return j['Politicality']
 

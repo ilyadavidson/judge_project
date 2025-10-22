@@ -21,12 +21,12 @@ def main():
 
     j['is promoted']                                   = is_promoted(j) 
     j['overturn rate']                                 = compute_overturns(j, c, cutoff=3) 
-    j['prestige index']                                = prestige_calculator(j)
+    j['prestige index']                                = prestige_calculator(j, 1, 1, 1)
     j['US support rate'], j['US_support_N']            = us_support_calculator(j, c)
     j['politicality']                                  = politicality_calculator(j, c)
-    j['citation_impact']                               = citation_calculator(j, c)
+    j['citation impact']                               = citation_calculator(j, c)
 
-    keep_cols = ["judge id", "is promoted", "overturn rate", "prestige index", "aba rating", "gender", "ethnicity", "party of appointing president"]
+    keep_cols = ["judge id", "is promoted", "overturn rate", "prestige index", "aba rating", "gender", "ethnicity", "party of appointing president", "US support rate", "politcality", "citation impact"]
     j         = j[[col for col in keep_cols if col in j.columns]]
 
     # 2. Output of feature dataset

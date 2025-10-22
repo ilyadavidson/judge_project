@@ -80,4 +80,4 @@ def main(which):
     print(f"[CAP] wrote {out_parquet} ({len(df_matched):,} rows)")
 
 if __name__ == "__main__":
-    main(['3rd', '4th']) # set to None to do all circuits
+    main(["1st", "2nd", "3rd"]) # set to None to do all circuits

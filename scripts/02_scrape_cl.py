@@ -20,7 +20,7 @@ CLEANED_DIR     = ensure_dir(CL_DIR / "cleaned")
 def main(which, resume):
     # 1. Get judges info and load CL data or scrape CL.
     ########################################################
-    # judges          = pd.read_csv(DATA_DIR / "judge_info.csv")
+    judges          = pd.read_csv(DATA_DIR / "judge_info.csv")
     
     if which is None:
         pick        = [c for c in circuits() if c not in {"dc","fed"}]
