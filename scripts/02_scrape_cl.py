@@ -37,26 +37,26 @@ def main(which, resume):
             print(f"[CL]s {scraped_csv} not found — scraping {cid} Circuit cases...")   # or scrape
             raw             = scrape_circuit(cid = cid)
 
-    #     cleaned             = cl_loader(raw, judges, cid)
-    #     per_circuit_clean   = CLEANED_DIR / f"{cid}_cl_data_clean.csv" 
+        cleaned             = cl_loader(raw, judges, cid)
+        per_circuit_clean   = CLEANED_DIR / f"{cid}_cl_data_clean.csv" 
 
-    #     cleaned.to_csv(per_circuit_clean, index=False)
-    #     print(f"[CL] wrote {per_circuit_clean} ({len(cleaned):,} rows)")
-    #     parts.append(cleaned)
+        cleaned.to_csv(per_circuit_clean, index=False)
+        print(f"[CL] wrote {per_circuit_clean} ({len(cleaned):,} rows)")
+        parts.append(cleaned)
 
-    # # 2.1. Ensure required columns are present
-    # cl          = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-    # required    = {"district judge id","district judge","opinion_text","unique_id","name","docket_number"}
-    # missing     = required - set(cl.columns)
-    # if missing:
-    #     raise ValueError(f"[CL] Missing required columns: {', '.join(missing)}")
+    # 2.1. Ensure required columns are present
+    cl          = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    required    = {"district judge id","district judge","opinion_text","unique_id","name","docket_number"}
+    missing     = required - set(cl.columns)
+    if missing:
+        raise ValueError(f"[CL] Missing required columns: {', '.join(missing)}")
 
-    # # 2. Return clean CL files.
-    # ########################################################
-    # out_name = "cl_data_clean.csv" if which is None else f"cl_data_clean_{'_'.join(pick)}.csv"
-    # out_csv  = CL_DIR / out_name
-    # cl.to_csv(out_csv, index=False)
-    # print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
+    # 2. Return clean CL files.
+    ########################################################
+    out_name = "cl_data_clean.csv" if which is None else f"cl_data_clean_{'_'.join(pick)}.csv"
+    out_csv  = CL_DIR / out_name
+    cl.to_csv(out_csv, index=False)
+    print(f"[CL] wrote {out_csv} ({len(cl):,} rows)")
 
 if __name__ == "__main__":
     main([ "7th", "8th", "9th"], resume=False)  # set to None to do all circuits

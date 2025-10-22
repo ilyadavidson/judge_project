@@ -267,3 +267,22 @@ def _norm_circuit(c) -> str:
         raise ValueError(f"Expected a numbered circuit like '4th' or '3d', got '{c}'")
     return f"ca{num}"
 
+def judge(name: str):
+    judges = pd.read_csv('data/judge_info.csv')
+    judge = judges[judges['last name']==name]
+    return judge
+
+def norm_string(s): return re.sub(r'\s+', ' ', str(s).strip().lower())
+
+def _to_list(v):
+    if isinstance(v, list): return v
+    if pd.isna(v): return []
+    if isinstance(v, str):
+        s = v.strip()
+        # if it looks like a JSON-ish list, parse it
+        if (s.startswith('[') and s.endswith(']')) or (s.startswith('(') and s.endswith(')')):
+            try: return list(ast.literal_eval(s))
+            except: pass
+        # else split on commas
+        return [t.strip() for t in s.split(',') if t.strip()]
+    return [str(v)]
